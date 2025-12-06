@@ -189,9 +189,21 @@ export function apply(ctx: Context, config: Config) {
     }
   })
 
+  // 追踪市场开市状态，用于在开市时切换K线模型
+  let wasMarketOpen = false
+
   // 市场定时任务（每 2 分钟运行一次）
   ctx.setInterval(async () => {
-    if (!await isMarketOpen()) return
+    const isOpen = await isMarketOpen()
+    
+    // 检测开市事件：从关闭变为开启
+    if (isOpen && !wasMarketOpen) {
+      // 开市了，切换K线模型
+      switchKLinePattern('自动开市')
+    }
+    wasMarketOpen = isOpen
+    
+    if (!isOpen) return
     await updatePrice()
     await processPendingTransactions()
 
@@ -403,6 +415,116 @@ export function apply(ctx: Context, config: Config) {
 
   // --- 宏观调控逻辑 ---
 
+  // K线形态模型库（日内短线模型）
+  // 每个模型返回一个函数，根据日内进度(0-1)返回相对价格偏移系数(-1到1)
+  const kLinePatterns = {
+    // 1. 早盘冲高回落：开盘上涨，午后回落
+    morningRally: (p: number) => {
+      if (p < 0.3) return Math.sin(p / 0.3 * Math.PI / 2) * 1.0
+      return Math.cos((p - 0.3) / 0.7 * Math.PI / 2) * 0.6
+    },
+    // 2. 早盘低开高走：开盘下跌，之后持续上涨
+    vShape: (p: number) => {
+      if (p < 0.25) return -Math.sin(p / 0.25 * Math.PI / 2) * 0.8
+      return -0.8 + (p - 0.25) / 0.75 * 1.6
+    },
+    // 3. 倒V型：持续上涨后快速下跌
+    invertedV: (p: number) => {
+      if (p < 0.6) return Math.sin(p / 0.6 * Math.PI / 2) * 1.0
+      return Math.cos((p - 0.6) / 0.4 * Math.PI / 2) * 1.0
+    },
+    // 4. 震荡整理：小幅波动，无明显方向
+    consolidation: (p: number) => {
+      return Math.sin(p * Math.PI * 4) * 0.3 + Math.sin(p * Math.PI * 7) * 0.15
+    },
+    // 5. 阶梯上涨：分段上涨，有回调
+    stairUp: (p: number) => {
+      const step = Math.floor(p * 4)
+      const inStep = (p * 4) % 1
+      const base = step * 0.25
+      const stepMove = inStep < 0.7 ? Math.sin(inStep / 0.7 * Math.PI / 2) * 0.3 : 0.3 - (inStep - 0.7) / 0.3 * 0.1
+      return base + stepMove
+    },
+    // 6. 阶梯下跌：分段下跌，有反弹
+    stairDown: (p: number) => {
+      const step = Math.floor(p * 4)
+      const inStep = (p * 4) % 1
+      const base = -step * 0.25
+      const stepMove = inStep < 0.7 ? -Math.sin(inStep / 0.7 * Math.PI / 2) * 0.3 : -0.3 + (inStep - 0.7) / 0.3 * 0.1
+      return base + stepMove
+    },
+    // 7. 尾盘拉升：前期平稳，尾盘快速上涨
+    lateRally: (p: number) => {
+      if (p < 0.7) return Math.sin(p / 0.7 * Math.PI * 2) * 0.2
+      return (p - 0.7) / 0.3 * 1.0
+    },
+    // 8. 尾盘跳水：前期平稳或上涨，尾盘快速下跌
+    lateDive: (p: number) => {
+      if (p < 0.7) return Math.sin(p / 0.7 * Math.PI / 2) * 0.4
+      return 0.4 - (p - 0.7) / 0.3 * 1.2
+    },
+    // 9. W底：双底形态
+    doubleBottom: (p: number) => {
+      if (p < 0.25) return -Math.sin(p / 0.25 * Math.PI / 2) * 0.8
+      if (p < 0.5) return -0.8 + Math.sin((p - 0.25) / 0.25 * Math.PI / 2) * 0.5
+      if (p < 0.75) return -0.3 - Math.sin((p - 0.5) / 0.25 * Math.PI / 2) * 0.5
+      return -0.8 + (p - 0.75) / 0.25 * 1.2
+    },
+    // 10. M顶：双顶形态
+    doubleTop: (p: number) => {
+      if (p < 0.25) return Math.sin(p / 0.25 * Math.PI / 2) * 0.8
+      if (p < 0.5) return 0.8 - Math.sin((p - 0.25) / 0.25 * Math.PI / 2) * 0.5
+      if (p < 0.75) return 0.3 + Math.sin((p - 0.5) / 0.25 * Math.PI / 2) * 0.5
+      return 0.8 - (p - 0.75) / 0.25 * 1.2
+    },
+    // 11. 单边上涨
+    bullish: (p: number) => {
+      return Math.sin(p * Math.PI / 2) * 0.8 + Math.sin(p * Math.PI * 3) * 0.1
+    },
+    // 12. 单边下跌
+    bearish: (p: number) => {
+      return -Math.sin(p * Math.PI / 2) * 0.8 + Math.sin(p * Math.PI * 3) * 0.1
+    }
+  }
+
+  const patternNames = Object.keys(kLinePatterns) as (keyof typeof kLinePatterns)[]
+  
+  // K线模型中文名映射
+  const patternChineseNames: Record<keyof typeof kLinePatterns, string> = {
+    morningRally: '早盘冲高回落',
+    vShape: 'V型反转',
+    invertedV: '倒V型',
+    consolidation: '震荡整理',
+    stairUp: '阶梯上涨',
+    stairDown: '阶梯下跌',
+    lateRally: '尾盘拉升',
+    lateDive: '尾盘跳水',
+    doubleBottom: 'W底(双底)',
+    doubleTop: 'M顶(双顶)',
+    bullish: '单边上涨',
+    bearish: '单边下跌'
+  }
+
+  // 当前使用的K线模型（开市时自动切换）
+  let currentDayPattern: keyof typeof kLinePatterns = patternNames[Math.floor(Math.random() * patternNames.length)]
+  // 记录上次切换时间和下次计划切换时间（用于随机时间切换）
+  let lastPatternSwitchTime = new Date()
+  // 初始化下次切换时间：当前时间 + 随机时长 (1-6小时)
+  let nextPatternSwitchTime = new Date(Date.now() + (1 + Math.random() * 5) * 3600 * 1000)
+
+  // 切换K线模型的函数
+  function switchKLinePattern(reason: string) {
+    const oldPattern = currentDayPattern
+    currentDayPattern = patternNames[Math.floor(Math.random() * patternNames.length)]
+    const now = new Date()
+    lastPatternSwitchTime = now
+    // 重置下次切换时间（1-6小时后）
+    const minDuration = 1 * 3600 * 1000
+    const randomDuration = Math.random() * 5 * 3600 * 1000
+    nextPatternSwitchTime = new Date(now.getTime() + minDuration + randomDuration)
+    logger.info(`${reason}切换K线模型: ${patternChineseNames[oldPattern]}(${oldPattern}) -> ${patternChineseNames[currentDayPattern]}(${currentDayPattern}), 下次随机切换: ${nextPatternSwitchTime.toLocaleString()}`)
+  }
+
   async function updatePrice() {
     // 获取当前调控状态
     let state = (await ctx.database.get('bourse_state', { key: 'macro_state' }))[0]
@@ -410,10 +532,10 @@ export function apply(ctx: Context, config: Config) {
 
     // 确保时间类型正确
     if (state) {
-      if (!state.lastCycleStart) state.lastCycleStart = new Date(Date.now() - 24 * 3600 * 1000)
+      if (!state.lastCycleStart) state.lastCycleStart = new Date(Date.now() - 7 * 24 * 3600 * 1000)
       if (!(state.lastCycleStart instanceof Date)) state.lastCycleStart = new Date(state.lastCycleStart)
       
-      if (!state.endTime) state.endTime = new Date(state.lastCycleStart.getTime() + 24 * 3600 * 1000)
+      if (!state.endTime) state.endTime = new Date(state.lastCycleStart.getTime() + 7 * 24 * 3600 * 1000)
       if (!(state.endTime instanceof Date)) state.endTime = new Date(state.endTime)
     }
 
@@ -448,18 +570,17 @@ export function apply(ctx: Context, config: Config) {
       if (!state) {
         needNewState = true
       } else {
-        // 检查是否过期
-        // 默认自动调控周期 24 小时
-        const endTime = state.endTime || new Date(state.lastCycleStart.getTime() + 24 * 3600 * 1000)
+        // 检查是否过期（一周周期）
+        const endTime = state.endTime || new Date(state.lastCycleStart.getTime() + 7 * 24 * 3600 * 1000)
         if (now > endTime) {
           needNewState = true
         }
       }
 
       if (needNewState) {
-        // 生成新的自动调控状态
-        const durationHours = 24 // 固定 24 小时
-        const fluctuation = 0.25 // 固定 25% 波动
+        // 生成新的自动调控状态（一周周期）
+        const durationHours = 7 * 24 // 一周 = 168 小时
+        const fluctuation = 0.30 // 一周内最大30%波动
         const targetRatio = 1 + (Math.random() * 2 - 1) * fluctuation // 随机涨跌幅
         const targetPrice = currentPrice * targetRatio
         const endTime = new Date(now.getTime() + durationHours * 3600 * 1000)
@@ -487,33 +608,60 @@ export function apply(ctx: Context, config: Config) {
       }
     }
 
+    // 检查是否需要随机时间切换K线模型
+    const timeSinceLastSwitch = now.getTime() - lastPatternSwitchTime.getTime()
+    // 强制切换阈值：30小时 (防止因某些原因卡死在旧模型)
+    const forceSwitchDuration = 30 * 3600 * 1000
+    
+    if (now >= nextPatternSwitchTime || timeSinceLastSwitch > forceSwitchDuration) {
+      switchKLinePattern('随机时间')
+    }
+
     // 应用价格变化
-    // 1. 趋势项：根据宏观目标计算的线性趋势 (2分钟)
+    // 1. 宏观趋势项：根据周目标计算的线性趋势 (2分钟)
     const trend = state.trendFactor * 2
     
-    // 2. 波动项：随机游走，模拟市场噪音 (0.5% 波动)
-    // 降低随机波动，让波浪趋势更明显
-    const volatility = currentPrice * 0.005 * (Math.random() * 2 - 1)
+    // 2. 随机波动项：模拟市场噪音 (0.3% 波动)
+    const volatility = currentPrice * 0.003 * (Math.random() * 2 - 1)
 
-    // 3. 周期性波浪项：确保大周期内有涨有跌
-    // 使用正弦波叠加：Amplitude * sin(2 * PI * k * progress)
-    // 计算当前时刻和上一时刻的波浪值差异
+    // 3. 日内K线形态项：根据当天选中的K线模型计算价格偏移
+    const dayStart = new Date(now)
+    dayStart.setHours(config.openHour, 0, 0, 0)
+    const dayEnd = new Date(now)
+    dayEnd.setHours(config.closeHour, 0, 0, 0)
+    const dayDuration = dayEnd.getTime() - dayStart.getTime()
+    const dayElapsed = now.getTime() - dayStart.getTime()
+    const dayProgress = Math.max(0, Math.min(1, dayElapsed / dayDuration))
+    
+    // 计算日内K线模型的价格偏移（相对于日内波动幅度）
+    const dailyAmplitude = state.startPrice * 0.05 // 日内波动幅度约为5%
+    const patternFn = kLinePatterns[currentDayPattern]
+    
+    // 计算当前和上一时刻的K线值差异
+    const prevDayProgress = Math.max(0, (dayElapsed - 2 * 60 * 1000) / dayDuration)
+    const patternDelta = (patternFn(dayProgress) - patternFn(prevDayProgress)) * dailyAmplitude
+
+    // 4. 周内波浪项：一周内有多个波段
     const totalDuration = state.endTime.getTime() - state.lastCycleStart.getTime()
     const elapsed = now.getTime() - state.lastCycleStart.getTime()
-    const prevElapsed = elapsed - 2 * 60 * 1000 // 2分钟前
+    const prevElapsed = elapsed - 2 * 60 * 1000
 
-    // 波浪参数
-    const waveCount = 3 // 一个大周期内有3个完整的涨跌波段
-    const amplitude = state.startPrice * 0.15 // 波浪幅度为起始价格的15%
+    // 周波浪参数：一周内约7个波段（每天一个大致方向）
+    const waveCount = 7
+    const weeklyAmplitude = state.startPrice * 0.08 // 周波浪幅度8%
 
     const getWaveValue = (t: number) => {
         const progress = t / totalDuration
-        return amplitude * Math.sin(2 * Math.PI * waveCount * progress)
+        // 复合波形：主波 + 次波
+        return weeklyAmplitude * (
+          Math.sin(2 * Math.PI * waveCount * progress) * 0.7 +
+          Math.sin(2 * Math.PI * waveCount * 2.5 * progress) * 0.3
+        )
     }
 
     const waveDelta = getWaveValue(elapsed) - getWaveValue(prevElapsed)
     
-    let newPrice = currentPrice + trend + volatility + waveDelta
+    let newPrice = currentPrice + trend + volatility + patternDelta + waveDelta
     if (newPrice < 1) newPrice = 1 // 最低价格保护
 
     currentPrice = newPrice
@@ -785,6 +933,9 @@ export function apply(ctx: Context, config: Config) {
     .action(async ({ session }, status) => {
       if (!['open', 'close', 'auto'].includes(status)) return '无效状态，请使用 open, close, 或 auto'
       
+      // 检查是否是从关闭状态变为开启
+      const wasOpen = await isMarketOpen()
+      
       const key = 'macro_state'
       const existing = await ctx.database.get('bourse_state', { key })
       if (existing.length === 0) {
@@ -802,7 +953,22 @@ export function apply(ctx: Context, config: Config) {
       } else {
          await ctx.database.set('bourse_state', { key }, { marketOpenStatus: status as 'open' | 'close' | 'auto' })
       }
+      
+      // 如果是开市操作（从关闭变为开启），切换K线模型
+      if (status === 'open' && !wasOpen) {
+        switchKLinePattern('管理员开市')
+        wasMarketOpen = true
+      } else if (status === 'close') {
+        wasMarketOpen = false
+      }
+      
       return `股市状态已设置为: ${status}`
+    })
+
+  ctx.command('stock.pattern', '管理员：强制切换K线模型', { authority: 3 })
+    .action(() => {
+      switchKLinePattern('管理员手动')
+      return '已切换K线模型。'
     })
 
   // --- 渲染逻辑 ---
@@ -991,17 +1157,65 @@ export function apply(ctx: Context, config: Config) {
         ctx.fillStyle = '#999';
         ctx.font = '500 18px "Segoe UI", sans-serif';
         
-        const timeStep = Math.ceil(times.length / 5);
+        // 动态计算标签间隔，防止重叠
+        // 使用最长的时间标签来估算宽度
+        let maxLabelWidth = 0;
+        for (let i = 0; i < times.length; i++) {
+            const w = ctx.measureText(times[i]).width;
+            if (w > maxLabelWidth) maxLabelWidth = w;
+        }
+        const labelWidth = maxLabelWidth + 40; // 加40px间距确保不重叠
+        const availableWidth = width - padding.left - padding.right;
+        const maxLabels = Math.max(2, Math.floor(availableWidth / labelWidth));
+        const labelCount = Math.min(maxLabels, 5); // 最多显示5个标签
+        const timeStep = Math.max(1, Math.ceil(times.length / labelCount));
+        
+        // 选取要绘制的标签索引（均匀分布）
+        const labelIndices = [];
         for (let i = 0; i < times.length; i += timeStep) {
+           labelIndices.push(i);
+        }
+        // 确保最后一个点在列表中
+        if (labelIndices[labelIndices.length - 1] !== times.length - 1) {
+           labelIndices.push(times.length - 1);
+        }
+        
+        // 绘制标签，跳过重叠的
+        const drawnLabels = [];
+        for (const i of labelIndices) {
+           const x = getX(timestamps[i]);
+           const textWidth = ctx.measureText(times[i]).width;
+           
+           // 根据textAlign计算实际占用的区域
+           let leftEdge, rightEdge;
+           if (i === 0) {
+               leftEdge = x;
+               rightEdge = x + textWidth;
+           } else if (i === times.length - 1) {
+               leftEdge = x - textWidth;
+               rightEdge = x;
+           } else {
+               leftEdge = x - textWidth / 2;
+               rightEdge = x + textWidth / 2;
+           }
+           
+           // 检查是否与已绘制的标签重叠
+           let overlaps = false;
+           for (const drawn of drawnLabels) {
+               // 两个标签之间至少要有15px间隔
+               if (!(rightEdge + 15 < drawn.left || leftEdge - 15 > drawn.right)) {
+                   overlaps = true;
+                   break;
+               }
+           }
+           if (overlaps) continue;
+           
            if (i === 0) ctx.textAlign = 'left';
-           else if (i >= times.length - 1) ctx.textAlign = 'right';
+           else if (i === times.length - 1) ctx.textAlign = 'right';
            else ctx.textAlign = 'center';
            
-           ctx.fillText(times[i], getX(timestamps[i]), height - 10);
-        }
-        if ((times.length - 1) % timeStep !== 0) {
-             ctx.textAlign = 'right';
-             ctx.fillText(times[times.length-1], getX(timestamps[times.length-1]), height - 10);
+           ctx.fillText(times[i], x, height - 10);
+           drawnLabels.push({ left: leftEdge, right: rightEdge });
         }
 
       </script>
