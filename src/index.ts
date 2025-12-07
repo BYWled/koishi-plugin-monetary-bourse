@@ -47,6 +47,7 @@ export interface BourseHolding {
   userId: string
   stockId: string
   amount: number
+  totalCost: number // 买入总成本，用于计算盈亏
 }
 
 export interface BoursePending {
@@ -142,6 +143,7 @@ export function apply(ctx: Context, config: Config) {
     userId: 'string',
     stockId: 'string',
     amount: 'integer',
+    totalCost: 'double', // 买入总成本
   }, { primary: ['userId', 'stockId'] })
 
   ctx.model.extend('bourse_pending', {
@@ -177,13 +179,13 @@ export function apply(ctx: Context, config: Config) {
 
   // 2. 股票引擎状态
   const stockId = 'MAIN' // 目前仅支持一支股票
-  let currentPrice = config.initialPrice
+  let currentPrice = Number(config.initialPrice.toFixed(2))
 
   // 启动时加载最近行情，若无则写入初始价格
   ctx.on('ready', async () => {
     const history = await ctx.database.get('bourse_history', { stockId }, { limit: 1, sort: { time: 'desc' } })
     if (history.length > 0) {
-      currentPrice = history[0].price
+      currentPrice = Number(history[0].price.toFixed(2))
     } else {
       await ctx.database.create('bourse_history', { stockId, price: currentPrice, time: new Date() })
     }
@@ -292,7 +294,8 @@ export function apply(ctx: Context, config: Config) {
       }
 
       const current = Number(records[0].value || 0)
-      const newValue = current + delta
+      // 保留两位小数，避免浮点数精度丢失
+      const newValue = Number((current + delta).toFixed(2))
       
       if (newValue < 0) {
         logger.warn(`changeCashBalance: 余额不足 current=${current}, delta=${delta}`)
@@ -354,15 +357,16 @@ export function apply(ctx: Context, config: Config) {
         .orderBy('settlementDate', 'asc')
         .execute()
 
-      let remaining = amount
+      let remaining = Number(amount.toFixed(2))
       for (const record of demandRecords) {
         if (remaining <= 0) break
 
         if (record.amount <= remaining) {
-          remaining -= record.amount
+          remaining = Number((remaining - record.amount).toFixed(2))
           await ctx.database.remove('monetary_bank_int', { id: record.id })
         } else {
-          await ctx.database.set('monetary_bank_int', { id: record.id }, { amount: record.amount - remaining })
+          const newAmount = Number((record.amount - remaining).toFixed(2))
+          await ctx.database.set('monetary_bank_int', { id: record.id }, { amount: newAmount })
           remaining = 0
         }
       }
@@ -387,17 +391,17 @@ export function apply(ctx: Context, config: Config) {
     logger.info(`pay: 现金=${cash}, 活期=${bankDemand}, 需要=${cost}`)
 
     if (cash + bankDemand < cost) {
-      return { success: false, msg: `资金不足！需要 ${cost.toFixed(2)}，当前现金 ${cash} + 活期 ${bankDemand}` }
+      return { success: false, msg: `资金不足！需要 ${cost.toFixed(2)}，当前现金 ${cash.toFixed(2)} + 活期 ${bankDemand.toFixed(2)}` }
     }
 
-    let remainingCost = cost
+    let remainingCost = Number(cost.toFixed(2))
     
     // 1. 扣除现金
-    const cashDeduct = Math.min(cash, remainingCost)
+    const cashDeduct = Number(Math.min(cash, remainingCost).toFixed(2))
     if (cashDeduct > 0) {
       const success = await changeCashBalance(uid, currency, -cashDeduct)
       if (!success) return { success: false, msg: '扣除现金失败，请重试' }
-      remainingCost -= cashDeduct
+      remainingCost = Number((remainingCost - cashDeduct).toFixed(2))
     }
 
     // 2. 扣除银行活期
@@ -670,6 +674,8 @@ export function apply(ctx: Context, config: Config) {
     let newPrice = currentPrice + trend + volatility + patternDelta + waveDelta
     if (newPrice < 1) newPrice = 1 // 最低价格保护
 
+    // 保留两位小数
+    newPrice = Number(newPrice.toFixed(2))
     currentPrice = newPrice
     await ctx.database.create('bourse_history', { stockId, price: newPrice, time: new Date() })
     
@@ -685,12 +691,30 @@ export function apply(ctx: Context, config: Config) {
 
     for (const txn of pending) {
       if (txn.type === 'buy') {
-        // 买入解冻：增加持仓
+        // 买入解冻：增加持仓和总成本
         const holding = await ctx.database.get('bourse_holding', { userId: txn.userId, stockId })
         if (holding.length === 0) {
-          await ctx.database.create('bourse_holding', { userId: txn.userId, stockId, amount: txn.amount })
+          await ctx.database.create('bourse_holding', { 
+            userId: txn.userId, 
+            stockId, 
+            amount: txn.amount,
+            totalCost: Number(txn.cost.toFixed(2))
+          })
         } else {
-          await ctx.database.set('bourse_holding', { userId: txn.userId, stockId }, { amount: holding[0].amount + txn.amount })
+          // 兼容旧版本数据：totalCost 可能为 undefined 或 null 或 0
+          // 关键修复：如果旧数据没有成本记录，用【交易时的单价】估算旧持仓成本
+          // 这样新旧数据合并时不会造成成本稀释
+          let existingCost = holding[0].totalCost
+          if (!existingCost || existingCost <= 0) {
+            // 用交易时的单价估算旧持仓成本（比用当前市价更准确，因为交易时价格更接近用户买入时的价格）
+            existingCost = Number((holding[0].amount * txn.price).toFixed(2))
+            logger.info(`processPendingTransactions: 旧持仓无成本记录，使用交易价格估算: ${holding[0].amount}股 * ${txn.price} = ${existingCost}`)
+          }
+          const newTotalCost = Number((existingCost + txn.cost).toFixed(2))
+          await ctx.database.set('bourse_holding', { userId: txn.userId, stockId }, { 
+            amount: holding[0].amount + txn.amount,
+            totalCost: newTotalCost
+          })
         }
       } else if (txn.type === 'sell') {
         // 卖出解冻：增加现金
@@ -800,9 +824,14 @@ export function apply(ctx: Context, config: Config) {
       }
 
       // 计算冻结时间（按交易金额计算）
-      let freezeMinutes = cost / config.freezeCostPerMinute
-      if (freezeMinutes < config.minFreezeTime) freezeMinutes = config.minFreezeTime
-      if (freezeMinutes > config.maxFreezeTime) freezeMinutes = config.maxFreezeTime
+      // 注意：maxFreezeTime=0 表示无冻结，直接完成交易
+      let freezeMinutes = 0
+      if (config.maxFreezeTime > 0) {
+        freezeMinutes = cost / config.freezeCostPerMinute
+        // 先限制最大值，再限制最小值（确保最小值优先）
+        if (freezeMinutes > config.maxFreezeTime) freezeMinutes = config.maxFreezeTime
+        if (freezeMinutes < config.minFreezeTime) freezeMinutes = config.minFreezeTime
+      }
       const freezeMs = freezeMinutes * 60 * 1000
       const endTime = new Date(Date.now() + freezeMs)
 
@@ -817,6 +846,12 @@ export function apply(ctx: Context, config: Config) {
         startTime: new Date(),
         endTime
       })
+
+      // 如果冻结时间为0，立即处理挂单（不等待定时任务）
+      if (freezeMinutes === 0) {
+        await processPendingTransactions()
+        return `交易已完成！\n花费: ${cost.toFixed(2)} ${config.currency}\n股票已到账。`
+      }
 
       return `交易申请已提交！\n花费: ${cost.toFixed(2)} ${config.currency}\n冻结时间: ${freezeMinutes.toFixed(1)}分钟\n股票将在解冻后到账。`
     })
@@ -840,20 +875,41 @@ export function apply(ctx: Context, config: Config) {
         return `持仓不足！当前持有: ${holding.length ? holding[0].amount : 0} 股。`
       }
 
-      // 立即扣减持仓
-      const newAmount = holding[0].amount - amount
+      // 计算卖出部分对应的成本（按比例扣减）
+      const currentHolding = holding[0]
+      // 兼容旧版本数据：totalCost 可能为 undefined 或 null 或 0
+      // 如果没有成本记录，用当前市价估算（这样卖出后盈亏显示为0，符合预期）
+      let existingTotalCost = currentHolding.totalCost
+      if (!existingTotalCost || existingTotalCost <= 0) {
+        existingTotalCost = Number((currentHolding.amount * currentPrice).toFixed(2))
+        logger.info(`stock.sell: 旧持仓无成本记录，使用当前市价估算: ${currentHolding.amount}股 * ${currentPrice} = ${existingTotalCost}`)
+      }
+      const avgCostPerShare = Number((existingTotalCost / currentHolding.amount).toFixed(2))
+      const soldCost = Number((avgCostPerShare * amount).toFixed(2))
+
+      // 立即扣减持仓和对应成本
+      const newAmount = currentHolding.amount - amount
       if (newAmount === 0) {
         await ctx.database.remove('bourse_holding', { userId: visibleUserId, stockId })
       } else {
-        await ctx.database.set('bourse_holding', { userId: visibleUserId, stockId }, { amount: newAmount })
+        const newTotalCost = Number((existingTotalCost - soldCost).toFixed(2))
+        await ctx.database.set('bourse_holding', { userId: visibleUserId, stockId }, { 
+          amount: newAmount,
+          totalCost: Math.max(0, newTotalCost) // 确保不为负数
+        })
       }
 
       // 计算收益
       const gain = Number((currentPrice * amount).toFixed(2))
       // 计算冻结时间（按交易金额计算）
-      let freezeMinutes = gain / config.freezeCostPerMinute
-      if (freezeMinutes < config.minFreezeTime) freezeMinutes = config.minFreezeTime
-      if (freezeMinutes > config.maxFreezeTime) freezeMinutes = config.maxFreezeTime
+      // 注意：maxFreezeTime=0 表示无冻结，直接完成交易
+      let freezeMinutes = 0
+      if (config.maxFreezeTime > 0) {
+        freezeMinutes = gain / config.freezeCostPerMinute
+        // 先限制最大值，再限制最小值（确保最小值优先）
+        if (freezeMinutes > config.maxFreezeTime) freezeMinutes = config.maxFreezeTime
+        if (freezeMinutes < config.minFreezeTime) freezeMinutes = config.minFreezeTime
+      }
       const freezeMs = freezeMinutes * 60 * 1000
       const endTime = new Date(Date.now() + freezeMs)
 
@@ -869,6 +925,12 @@ export function apply(ctx: Context, config: Config) {
         endTime
       })
 
+      // 如果冻结时间为0，立即处理挂单（不等待定时任务）
+      if (freezeMinutes === 0) {
+        await processPendingTransactions()
+        return `卖出已完成！\n收益: ${gain.toFixed(2)} ${config.currency}\n资金已到账。`
+      }
+
       return `卖出挂单已提交！\n预计收益: ${gain.toFixed(2)} ${config.currency}\n资金冻结: ${freezeMinutes.toFixed(1)}分钟\n资金将在解冻后到账。`
     })
 
@@ -878,27 +940,48 @@ export function apply(ctx: Context, config: Config) {
       const holdings = await ctx.database.get('bourse_holding', { userId })
       const pending = await ctx.database.get('bourse_pending', { userId })
 
-      let msg = `=== ${session.username} 的股票账户 ===\n`
-      
+      // 计算持仓信息
+      let holdingData = null
       if (holdings.length > 0) {
         const h = holdings[0]
-        const value = h.amount * currentPrice
-        msg += `持仓: ${config.stockName} x${h.amount} 股\n`
-        msg += `当前市值: ${value.toFixed(2)} ${config.currency}\n`
-      } else {
-        msg += `持仓: 无\n`
-      }
-
-      if (pending.length > 0) {
-        msg += `\n--- 进行中的交易 ---\n`
-        for (const p of pending) {
-          const timeLeft = Math.max(0, Math.ceil((p.endTime.getTime() - Date.now()) / 1000))
-          const typeStr = p.type === 'buy' ? '买入' : '卖出'
-          msg += `[${typeStr}] ${p.amount}股 | 剩余冻结: ${timeLeft}秒\n`
+        const marketValue = Number((h.amount * currentPrice).toFixed(2))
+        // 兼容旧版本数据：totalCost 可能为 undefined 或 null 或 0
+        const hasCostData = h.totalCost !== undefined && h.totalCost !== null && h.totalCost > 0
+        const totalCost = hasCostData ? Number(h.totalCost.toFixed(2)) : 0
+        const avgCost = hasCostData && h.amount > 0 ? Number((totalCost / h.amount).toFixed(2)) : 0
+        const profit = hasCostData ? Number((marketValue - totalCost).toFixed(2)) : null
+        const profitPercent = hasCostData && totalCost > 0 ? Number(((profit / totalCost) * 100).toFixed(2)) : null
+        
+        holdingData = {
+          stockName: config.stockName,
+          amount: h.amount,
+          currentPrice: Number(currentPrice.toFixed(2)),
+          avgCost: hasCostData ? avgCost : null, // null 表示无成本记录
+          totalCost: hasCostData ? totalCost : null,
+          marketValue,
+          profit,
+          profitPercent
         }
       }
 
-      return msg
+      // 处理进行中的交易
+      const pendingData = pending.map(p => {
+        const timeLeft = Math.max(0, Math.ceil((p.endTime.getTime() - Date.now()) / 1000))
+        const minutes = Math.floor(timeLeft / 60)
+        const seconds = timeLeft % 60
+        return {
+          type: p.type === 'buy' ? '买入' : '卖出',
+          typeClass: p.type,
+          amount: p.amount,
+          price: Number(p.price.toFixed(2)),
+          cost: Number(p.cost.toFixed(2)),
+          timeLeft: `${minutes}分${seconds}秒`
+        }
+      })
+
+      // 渲染 HTML 图片
+      const img = await renderHoldingImage(ctx, session.username, holdingData, pendingData, config.currency)
+      return img
     })
 
   ctx.command('stock.control <price:number> [hours:number]', '管理员：设置宏观调控目标', { authority: 3 })
@@ -978,6 +1061,379 @@ export function apply(ctx: Context, config: Config) {
     })
 
   // --- 渲染逻辑 ---
+
+  // 渲染持仓信息为 HTML 图片
+  async function renderHoldingImage(
+    ctx: Context, 
+    username: string, 
+    holding: {
+      stockName: string
+      amount: number
+      currentPrice: number
+      avgCost: number | null  // null 表示无成本记录
+      totalCost: number | null
+      marketValue: number
+      profit: number | null
+      profitPercent: number | null
+    } | null,
+    pending: {
+      type: string
+      typeClass: string
+      amount: number
+      price: number
+      cost: number
+      timeLeft: string
+    }[],
+    currency: string
+  ) {
+    // 判断是否有成本数据
+    const hasCostData = holding && holding.totalCost !== null
+    const isProfit = hasCostData ? holding.profit >= 0 : true
+    const profitColor = isProfit ? '#d93025' : '#188038'
+    const profitSign = isProfit ? '+' : ''
+
+    // 根据是否有成本数据渲染不同的盈亏区域
+    const profitSectionHtml = hasCostData ? `
+          <div class="profit-section" style="background: ${isProfit ? 'rgba(217, 48, 37, 0.08)' : 'rgba(24, 128, 56, 0.08)'}">
+            <div class="profit-label">盈亏</div>
+            <div class="profit-value" style="color: ${profitColor}">
+              ${profitSign}${holding.profit.toFixed(2)} ${currency}
+              <span class="profit-percent">(${profitSign}${holding.profitPercent.toFixed(2)}%)</span>
+            </div>
+          </div>
+    ` : `
+          <div class="profit-section no-data" style="background: rgba(128, 128, 128, 0.08)">
+            <div class="profit-label">盈亏</div>
+            <div class="profit-value" style="color: #888">
+              暂无成本记录
+              <span class="profit-hint">（新交易后将自动记录）</span>
+            </div>
+          </div>
+    `
+
+    const holdingHtml = holding ? `
+      <div class="section">
+        <div class="section-title">📈 持仓详情</div>
+        <div class="stock-card">
+          <div class="stock-header">
+            <div class="stock-name">${holding.stockName}</div>
+            <div class="stock-amount">${holding.amount} 股</div>
+          </div>
+          <div class="stock-body">
+            <div class="stat-row">
+              <div class="stat-item">
+                <div class="stat-label">现价</div>
+                <div class="stat-value">${holding.currentPrice.toFixed(2)}</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-label">成本价</div>
+                <div class="stat-value">${hasCostData ? holding.avgCost.toFixed(2) : '--'}</div>
+              </div>
+            </div>
+            <div class="stat-row">
+              <div class="stat-item">
+                <div class="stat-label">持仓成本</div>
+                <div class="stat-value">${hasCostData ? holding.totalCost.toFixed(2) : '--'}</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-label">市值</div>
+                <div class="stat-value highlight">${holding.marketValue.toFixed(2)}</div>
+              </div>
+            </div>
+          </div>
+          ${profitSectionHtml}
+        </div>
+      </div>
+    ` : `
+      <div class="section">
+        <div class="section-title">📈 持仓详情</div>
+        <div class="empty-state">
+          <div class="empty-icon">📭</div>
+          <div class="empty-text">暂无持仓</div>
+        </div>
+      </div>
+    `
+
+    const pendingHtml = pending.length > 0 ? `
+      <div class="section">
+        <div class="section-title">⏳ 进行中的交易</div>
+        ${pending.map(p => `
+          <div class="pending-item ${p.typeClass}">
+            <div class="pending-left">
+              <span class="pending-type ${p.typeClass}">${p.type}</span>
+              <span class="pending-amount">${p.amount} 股</span>
+            </div>
+            <div class="pending-center">
+              <span class="pending-price">单价 ${p.price.toFixed(2)}</span>
+              <span class="pending-cost">总额 ${p.cost.toFixed(2)}</span>
+            </div>
+            <div class="pending-right">
+              <span class="pending-time">⏱ ${p.timeLeft}</span>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    ` : ''
+
+    const html = `
+    <html>
+    <head>
+      <style>
+        body { 
+          margin: 0; 
+          padding: 20px; 
+          font-family: 'Segoe UI', 'Microsoft YaHei', Roboto, sans-serif; 
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+          width: 450px; 
+          box-sizing: border-box; 
+        }
+        .card { 
+          background: white; 
+          padding: 25px; 
+          border-radius: 20px; 
+          box-shadow: 0 20px 40px rgba(0,0,0,0.15); 
+        }
+        .header { 
+          display: flex; 
+          align-items: center; 
+          gap: 12px;
+          margin-bottom: 20px; 
+          padding-bottom: 15px;
+          border-bottom: 2px solid #f0f2f5;
+        }
+        .avatar {
+          width: 48px;
+          height: 48px;
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: white;
+          font-size: 20px;
+          font-weight: bold;
+        }
+        .user-info {
+          flex: 1;
+        }
+        .username { 
+          font-size: 22px; 
+          font-weight: 700; 
+          color: #1a1a1a; 
+        }
+        .account-label {
+          font-size: 13px;
+          color: #888;
+          margin-top: 2px;
+        }
+        .section {
+          margin-bottom: 20px;
+        }
+        .section:last-child {
+          margin-bottom: 0;
+        }
+        .section-title {
+          font-size: 14px;
+          font-weight: 600;
+          color: #666;
+          margin-bottom: 12px;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+        }
+        .stock-card {
+          background: #f8f9fc;
+          border-radius: 16px;
+          overflow: hidden;
+        }
+        .stock-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 16px 20px;
+          background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+          color: white;
+        }
+        .stock-name {
+          font-size: 18px;
+          font-weight: 700;
+        }
+        .stock-amount {
+          font-size: 16px;
+          font-weight: 600;
+          background: rgba(255,255,255,0.2);
+          padding: 4px 12px;
+          border-radius: 20px;
+        }
+        .stock-body {
+          padding: 16px 20px;
+        }
+        .stat-row {
+          display: flex;
+          justify-content: space-between;
+          margin-bottom: 12px;
+        }
+        .stat-row:last-child {
+          margin-bottom: 0;
+        }
+        .stat-item {
+          text-align: center;
+          flex: 1;
+        }
+        .stat-label {
+          font-size: 12px;
+          color: #888;
+          margin-bottom: 4px;
+        }
+        .stat-value {
+          font-size: 18px;
+          font-weight: 700;
+          color: #333;
+        }
+        .stat-value.highlight {
+          color: #667eea;
+        }
+        .profit-section {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 16px 20px;
+          border-top: 1px solid #eee;
+        }
+        .profit-label {
+          font-size: 14px;
+          font-weight: 600;
+          color: #666;
+        }
+        .profit-value {
+          font-size: 22px;
+          font-weight: 800;
+        }
+        .profit-percent {
+          font-size: 14px;
+          font-weight: 600;
+          margin-left: 6px;
+        }
+        .profit-hint {
+          font-size: 12px;
+          font-weight: 400;
+          display: block;
+          margin-top: 4px;
+        }
+        .profit-section.no-data .profit-value {
+          font-size: 16px;
+          font-weight: 600;
+        }
+        .empty-state {
+          background: #f8f9fc;
+          border-radius: 16px;
+          padding: 40px 20px;
+          text-align: center;
+        }
+        .empty-icon {
+          font-size: 48px;
+          margin-bottom: 12px;
+        }
+        .empty-text {
+          font-size: 16px;
+          color: #888;
+        }
+        .pending-item {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          background: #f8f9fc;
+          border-radius: 12px;
+          padding: 14px 16px;
+          margin-bottom: 10px;
+          border-left: 4px solid #ccc;
+        }
+        .pending-item.buy {
+          border-left-color: #d93025;
+        }
+        .pending-item.sell {
+          border-left-color: #188038;
+        }
+        .pending-item:last-child {
+          margin-bottom: 0;
+        }
+        .pending-left {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+        .pending-type {
+          font-size: 12px;
+          font-weight: 700;
+          padding: 3px 8px;
+          border-radius: 6px;
+          color: white;
+        }
+        .pending-type.buy {
+          background: #d93025;
+        }
+        .pending-type.sell {
+          background: #188038;
+        }
+        .pending-amount {
+          font-size: 15px;
+          font-weight: 600;
+          color: #333;
+        }
+        .pending-center {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 2px;
+        }
+        .pending-price, .pending-cost {
+          font-size: 12px;
+          color: #666;
+        }
+        .pending-right {
+          text-align: right;
+        }
+        .pending-time {
+          font-size: 13px;
+          font-weight: 600;
+          color: #f39c12;
+        }
+        .footer {
+          margin-top: 20px;
+          padding-top: 15px;
+          border-top: 1px solid #f0f2f5;
+          text-align: center;
+          font-size: 11px;
+          color: #bbb;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="card">
+        <div class="header">
+          <div class="avatar">${username.charAt(0).toUpperCase()}</div>
+          <div class="user-info">
+            <div class="username">${username}</div>
+            <div class="account-label">股票账户</div>
+          </div>
+        </div>
+        ${holdingHtml}
+        ${pendingHtml}
+        <div class="footer">
+          数据更新于 ${new Date().toLocaleString('zh-CN')}
+        </div>
+      </div>
+    </body>
+    </html>
+    `
+
+    const page = await ctx.puppeteer.page()
+    await page.setContent(html)
+    const element = await page.$('.card')
+    const imgBuf = await element?.screenshot({ encoding: 'binary' })
+    await page.close()
+    
+    return h.image(imgBuf, 'image/png')
+  }
   
   async function renderStockImage(ctx: Context, data: {time: string, price: number, timestamp: number}[], name: string, current: number, high: number, low: number) {
     if (data.length < 2) return '数据不足，无法绘制走势图。'
