@@ -559,7 +559,11 @@ export function apply(ctx: Context, config: Config) {
             endTime
          }
          if (!state) await ctx.database.create('bourse_state', newState)
-         else await ctx.database.set('bourse_state', 'macro_state', newState)
+         else {
+           // 排除主键字段，只更新其他字段
+           const { key, ...updateFields } = newState
+           await ctx.database.set('bourse_state', { key: 'macro_state' }, updateFields)
+         }
          state = newState
       }
     }
@@ -602,7 +606,9 @@ export function apply(ctx: Context, config: Config) {
         if (!state) {
           await ctx.database.create('bourse_state', newState)
         } else {
-          await ctx.database.set('bourse_state', 'macro_state', newState)
+          // 排除主键字段，只更新其他字段
+          const { key, ...updateFields } = newState
+          await ctx.database.set('bourse_state', { key: 'macro_state' }, updateFields)
         }
         state = newState
       }
