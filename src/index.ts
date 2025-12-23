@@ -545,9 +545,7 @@ export function apply(ctx: Context, config: Config) {
       if (!(state.endTime instanceof Date)) state.endTime = new Date(state.endTime)
     }
 
-    // 不再支持配置文件触发手动调控；仅当 state.mode === 'manual' 且未过期时沿用手动参数
-
-    // 状态初始化或过期检查 (仅在非强制手动模式下运行自动逻辑)
+    // 状态初始化或过期检查
     let needNewState = false
     if (!state) {
       needNewState = true
@@ -560,16 +558,16 @@ export function apply(ctx: Context, config: Config) {
       const durationHours = 7 * 24 // 一周周期
       const fluctuation = 0.30
       const targetRatio = 1 + (Math.random() * 2 - 1) * fluctuation
-      const targetPrice = currentPrice * targetRatio
+      let targetPrice = currentPrice * targetRatio
+      
+      // 立即应用±50%限幅到目标价格
+      const upperTarget = currentPrice * 1.5
+      const lowerTarget = currentPrice * 0.5
+      targetPrice = Math.max(lowerTarget, Math.min(upperTarget, targetPrice))
+      
       const endTime = new Date(now.getTime() + durationHours * 3600 * 1000)
       const minutes = durationHours * 60
       const trendFactor = (targetPrice - currentPrice) / minutes
-      // 刷新宏观频率参数
-      macroWaveCount = 5 + Math.floor(Math.random() * 6) // 5-10
-      macroWeeklyAmplitudeRatio = 0.06 + Math.random() * 0.06 // 6%-12%
-      // 下一次宏观目标随机刷新（6-24小时）
-      const hours = 6 + Math.floor(Math.random() * 19)
-      nextMacroSwitchTime = new Date(now.getTime() + hours * 3600 * 1000)
 
       const newState: BourseState = {
         key: 'macro_state',
@@ -591,27 +589,31 @@ export function apply(ctx: Context, config: Config) {
     if (needNewState) {
       await createAutoState()
     } else if (state.mode === 'auto' && nextMacroSwitchTime && now >= nextMacroSwitchTime) {
-      // 随机时间刷新宏观目标
+      // 随机时间刷新宏观目标(6-24小时)
+      const hours = 6 + Math.floor(Math.random() * 19)
+      nextMacroSwitchTime = new Date(now.getTime() + hours * 3600 * 1000)
       await createAutoState()
     }
 
     // 检查是否需要随机时间切换K线模型
     const timeSinceLastSwitch = now.getTime() - lastPatternSwitchTime.getTime()
-    // 强制切换阈值：30小时 (防止因某些原因卡死在旧模型)
     const forceSwitchDuration = 30 * 3600 * 1000
     
     if (now >= nextPatternSwitchTime || timeSinceLastSwitch > forceSwitchDuration) {
       switchKLinePattern('随机时间')
     }
 
-    // 应用价格变化
-    // 1. 宏观趋势项：根据周目标计算的线性趋势 (2分钟)
-    const trend = state.trendFactor * 2
+    // === 新的绝对价格计算逻辑 ===
+    // 基准价格：周期起始价
+    const basePrice = state.startPrice
     
-    // 2. 随机波动项：模拟市场噪音 (0.3% 波动)
-    const volatility = currentPrice * 0.003 * (Math.random() * 2 - 1)
-
-    // 3. 日内K线形态项：根据当天选中的K线模型计算价格偏移
+    // 1. 计算宏观趋势进度（周期内线性向目标价格移动）
+    const totalDuration = state.endTime.getTime() - state.lastCycleStart.getTime()
+    const elapsed = Math.min(totalDuration, now.getTime() - state.lastCycleStart.getTime())
+    const cycleProgress = elapsed / totalDuration
+    const trendPrice = basePrice + (state.targetPrice - basePrice) * cycleProgress
+    
+    // 2. 计算日内K线波动（相对于基准价的偏移）
     const dayStart = new Date(now)
     dayStart.setHours(config.openHour, 0, 0, 0)
     const dayEnd = new Date(now)
@@ -620,44 +622,37 @@ export function apply(ctx: Context, config: Config) {
     const dayElapsed = now.getTime() - dayStart.getTime()
     const dayProgress = Math.max(0, Math.min(1, dayElapsed / dayDuration))
     
-    // 计算日内K线模型的价格偏移（相对于日内波动幅度）
-    const dailyAmplitude = state.startPrice * 0.05 // 日内波动幅度约为5%
+    const dailyAmplitude = basePrice * 0.07 // 日内波动幅度
     const patternFn = kLinePatterns[currentDayPattern]
+    const patternOffset = patternFn(dayProgress) * dailyAmplitude
     
-    // 计算当前和上一时刻的K线值差异
-    const prevDayProgress = Math.max(0, (dayElapsed - 2 * 60 * 1000) / dayDuration)
-    const patternDelta = (patternFn(dayProgress) - patternFn(prevDayProgress)) * dailyAmplitude
-
-    // 4. 周内波浪项：一周内有多个波段
-    const totalDuration = state.endTime.getTime() - state.lastCycleStart.getTime()
-    const elapsed = now.getTime() - state.lastCycleStart.getTime()
-    const prevElapsed = elapsed - 2 * 60 * 1000
-
-    // 周波浪参数：随机频率与幅度
-    const waveCount = macroWaveCount
-    const weeklyAmplitude = state.startPrice * macroWeeklyAmplitudeRatio
-
-    const getWaveValue = (t: number) => {
-        const progress = t / totalDuration
-        // 复合波形：主波 + 次波
-        return weeklyAmplitude * (
-          Math.sin(2 * Math.PI * waveCount * progress) * 0.7 +
-          Math.sin(2 * Math.PI * waveCount * 2.5 * progress) * 0.3
-        )
-    }
-
-    const waveDelta = getWaveValue(elapsed) - getWaveValue(prevElapsed)
+    // 3. 周内波浪（平滑的正弦波动）
+    const waveFrequency = macroWaveCount
+    const weeklyAmplitude = basePrice * macroWeeklyAmplitudeRatio
+    const waveOffset = weeklyAmplitude * Math.sin(2 * Math.PI * waveFrequency * cycleProgress)
     
-    let newPrice = currentPrice + trend + volatility + patternDelta + waveDelta
-    if (newPrice < 1) newPrice = 1 // 最低价格保护
-
-    // 硬性涨跌幅限制：±50%（日内与周内同时受限）
-    const dayBase = dailyOpenPrice ?? state.startPrice
-    const upperLimit = Math.min(state.startPrice * 1.5, dayBase * 1.5)
-    const lowerLimit = Math.max(state.startPrice * 0.5, dayBase * 0.5)
-    if (newPrice > upperLimit) newPrice = upperLimit
-    if (newPrice < lowerLimit) newPrice = lowerLimit
-
+    // 4. 微小随机噪音（避免价格过于规律）
+    const noise = basePrice * 0.004 * (Math.random() * 2 - 1)
+    
+    // === 绝对价格合成 ===
+    let newPrice = trendPrice + patternOffset + waveOffset + noise
+    
+    // === 严格的±50%限幅（相对于周期起始价和日开盘价双重限制） ===
+    const dayBase = dailyOpenPrice ?? basePrice
+    const weekUpper = basePrice * 1.5
+    const weekLower = basePrice * 0.5
+    const dayUpper = dayBase * 1.5
+    const dayLower = dayBase * 0.5
+    
+    // 取两者的交集（更严格的限制）
+    const upperLimit = Math.min(weekUpper, dayUpper)
+    const lowerLimit = Math.max(weekLower, dayLower)
+    
+    newPrice = Math.max(lowerLimit, Math.min(upperLimit, newPrice))
+    
+    // 最低价格保护
+    if (newPrice < 1) newPrice = 1
+    
     // 保留两位小数
     newPrice = Number(newPrice.toFixed(2))
     currentPrice = newPrice
@@ -1053,27 +1048,27 @@ export function apply(ctx: Context, config: Config) {
     })
 
   // // --- 开发测试命令 ---
-  // ctx.command('bourse.test.price [ticks:number]', '开发测试：推进价格更新若干次并返回当前价格', { authority: 3 })
-  //   .action(async ({ session }, ticks?) => {
-  //     const n = typeof ticks === 'number' && ticks > 0 ? Math.min(ticks, 500) : 1
-  //     for (let i = 0; i < n; i++) {
-  //       await updatePrice()
-  //     }
-  //     return `测试完成：推进${n}次；当前价格：${Number(currentPrice.toFixed(2))}`
-  //   })
+  ctx.command('bourse.test.price [ticks:number]', '开发测试：推进价格更新若干次并返回当前价格', { authority: 3 })
+    .action(async ({ session }, ticks?) => {
+      const n = typeof ticks === 'number' && ticks > 0 ? Math.min(ticks, 500) : 1
+      for (let i = 0; i < n; i++) {
+        await updatePrice()
+      }
+      return `测试完成：推进${n}次；当前价格：${Number(currentPrice.toFixed(2))}`
+    })
 
-  // ctx.command('bourse.test.clamp <percent:number>', '开发测试：尝试目标涨跌幅并查看限幅结果', { authority: 3 })
-  //   .action(async ({ session }, percent) => {
-  //     if (typeof percent !== 'number') return '请输入百分比（例如 60 或 -40）'
-  //     const baseStart = (await ctx.database.get('bourse_state', { key: 'macro_state' }))[0]?.startPrice ?? currentPrice
-  //     const dayBase = dailyOpenPrice ?? baseStart
-  //     const upper = Math.min(baseStart * 1.5, dayBase * 1.5)
-  //     const lower = Math.max(baseStart * 0.5, dayBase * 0.5)
-  //     const expected = currentPrice * (1 + percent / 100)
-  //     const clamped = Math.max(lower, Math.min(upper, expected))
-  //     const hint = clamped !== expected ? `（已按±50%限幅从${Number(expected.toFixed(2))}调整为${Number(clamped.toFixed(2))}）` : ''
-  //     return `测试限幅：当前价=${Number(currentPrice.toFixed(2))}；期望=${Number(expected.toFixed(2))}；结果=${Number(clamped.toFixed(2))}${hint}`
-  //   })
+  ctx.command('bourse.test.clamp <percent:number>', '开发测试：尝试目标涨跌幅并查看限幅结果', { authority: 3 })
+    .action(async ({ session }, percent) => {
+      if (typeof percent !== 'number') return '请输入百分比（例如 60 或 -40）'
+      const baseStart = (await ctx.database.get('bourse_state', { key: 'macro_state' }))[0]?.startPrice ?? currentPrice
+      const dayBase = dailyOpenPrice ?? baseStart
+      const upper = Math.min(baseStart * 1.5, dayBase * 1.5)
+      const lower = Math.max(baseStart * 0.5, dayBase * 0.5)
+      const expected = currentPrice * (1 + percent / 100)
+      const clamped = Math.max(lower, Math.min(upper, expected))
+      const hint = clamped !== expected ? `（已按±50%限幅从${Number(expected.toFixed(2))}调整为${Number(clamped.toFixed(2))}）` : ''
+      return `测试限幅：当前价=${Number(currentPrice.toFixed(2))}；期望=${Number(expected.toFixed(2))}；结果=${Number(clamped.toFixed(2))}${hint}`
+    })
 
   // --- 渲染逻辑 ---
 
