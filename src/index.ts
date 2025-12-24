@@ -556,25 +556,21 @@ export function apply(ctx: Context, config: Config) {
 
     const createAutoState = async () => {
       const durationHours = 7 * 24 // 一周周期
-      const fluctuation = 0.30
+      const fluctuation = 0.25 // 周目标波动范围±25%
       const targetRatio = 1 + (Math.random() * 2 - 1) * fluctuation
       let targetPrice = currentPrice * targetRatio
       
-      // 立即应用±50%限幅到目标价格
-      const upperTarget = currentPrice * 1.5
-      const lowerTarget = currentPrice * 0.5
-      targetPrice = Math.max(lowerTarget, Math.min(upperTarget, targetPrice))
+      // 限幅
+      targetPrice = Math.max(currentPrice * 0.5, Math.min(currentPrice * 1.5, targetPrice))
       
       const endTime = new Date(now.getTime() + durationHours * 3600 * 1000)
-      const minutes = durationHours * 60
-      const trendFactor = (targetPrice - currentPrice) / minutes
 
       const newState: BourseState = {
         key: 'macro_state',
         lastCycleStart: now,
         startPrice: currentPrice,
         targetPrice,
-        trendFactor,
+        trendFactor: 0, // 不再使用线性趋势因子
         mode: 'auto',
         endTime
       }
@@ -589,31 +585,30 @@ export function apply(ctx: Context, config: Config) {
     if (needNewState) {
       await createAutoState()
     } else if (state.mode === 'auto' && nextMacroSwitchTime && now >= nextMacroSwitchTime) {
-      // 随机时间刷新宏观目标(6-24小时)
       const hours = 6 + Math.floor(Math.random() * 19)
       nextMacroSwitchTime = new Date(now.getTime() + hours * 3600 * 1000)
       await createAutoState()
     }
 
-    // 检查是否需要随机时间切换K线模型
+    // K线模型切换
     const timeSinceLastSwitch = now.getTime() - lastPatternSwitchTime.getTime()
     const forceSwitchDuration = 30 * 3600 * 1000
-    
     if (now >= nextPatternSwitchTime || timeSinceLastSwitch > forceSwitchDuration) {
       switchKLinePattern('随机时间')
     }
 
-    // === 股票走势计算逻辑（百分比波动模式） ===
-    // 基准：周期起始价
+    // ============================================================
+    // 真实股票走势模拟（几何布朗运动 + 均值回归 + 日内形态）
+    // ============================================================
+    
+    // --- 基础参数 ---
     const basePrice = state.startPrice
-    
-    // 1. 宏观趋势进度（周期内线性向目标价格移动）
+    const targetPrice = state.targetPrice
     const totalDuration = state.endTime.getTime() - state.lastCycleStart.getTime()
-    const elapsed = Math.min(totalDuration, now.getTime() - state.lastCycleStart.getTime())
+    const elapsed = now.getTime() - state.lastCycleStart.getTime()
     const cycleProgress = Math.max(0, Math.min(1, elapsed / totalDuration))
-    const trendPrice = basePrice + (state.targetPrice - basePrice) * cycleProgress
     
-    // 2. 日内K线波动因子（范围 -1 到 +1）
+    // --- 日内时间进度 ---
     const dayStart = new Date(now)
     dayStart.setHours(config.openHour, 0, 0, 0)
     const dayEnd = new Date(now)
@@ -621,32 +616,94 @@ export function apply(ctx: Context, config: Config) {
     const dayDuration = dayEnd.getTime() - dayStart.getTime()
     const dayElapsed = now.getTime() - dayStart.getTime()
     const dayProgress = Math.max(0, Math.min(1, dayElapsed / dayDuration))
+
+    // ============================================================
+    // 1. 宏观漂移项（Drift）- 向目标价格的均值回归
+    // ============================================================
+    // 使用均值回归模型：价格会缓慢向"当前应有价格"回归
+    // 当前应有价格 = 基准价 → 目标价的线性插值
+    const expectedPrice = basePrice + (targetPrice - basePrice) * cycleProgress
     
+    // 回归力度：价格偏离越大，回归力越强
+    const deviation = (expectedPrice - currentPrice) / currentPrice
+    const meanReversionStrength = 0.02 // 每次更新回归2%的偏差
+    const driftReturn = deviation * meanReversionStrength
+
+    // ============================================================
+    // 2. 波动率项（Volatility）- 基于日内时段变化
+    // ============================================================
+    // 真实股票的波动率在一天中不同时段是不同的
+    // 开盘和收盘波动大，午盘相对平静
+    const getVolatility = (progress: number): number => {
+      // U型波动率曲线：开盘高、午盘低、尾盘高
+      const morningVol = Math.exp(-8 * progress) // 开盘后快速下降
+      const afternoonVol = Math.exp(-8 * (1 - progress)) // 收盘前快速上升
+      const baseVol = 0.3 // 基础波动率
+      return baseVol + morningVol * 0.5 + afternoonVol * 0.4
+    }
+    
+    const volatility = getVolatility(dayProgress)
+    
+    // ============================================================
+    // 3. 随机项（Random Walk）- 几何布朗运动
+    // ============================================================
+    // 使用Box-Muller变换生成标准正态分布随机数
+    const u1 = Math.random()
+    const u2 = Math.random()
+    const normalRandom = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2)
+    
+    // 基础波动幅度（每2分钟约0.15%的标准差）
+    const baseVolatilityPerTick = 0.0015
+    const randomReturn = normalRandom * baseVolatilityPerTick * volatility
+
+    // ============================================================
+    // 4. K线形态项 - 叠加日内趋势偏好
+    // ============================================================
+    // K线形态提供一个微小的方向性偏置，而非直接决定价格
     const patternFn = kLinePatterns[currentDayPattern]
-    const dailyFactor = patternFn(dayProgress) * 0.03 // K线波动±3%
+    const patternValue = patternFn(dayProgress)
+    const prevPatternValue = patternFn(Math.max(0, dayProgress - 0.01))
+    const patternTrend = (patternValue - prevPatternValue) * 0.5 // 形态变化的方向
+    const patternBias = patternTrend * 0.003 // 转化为微小的收益率偏置
+
+    // ============================================================
+    // 5. 周期波浪项 - 中期波动
+    // ============================================================
+    // 在宏观趋势上叠加周期性波动，模拟市场情绪周期
+    const wavePhase = 2 * Math.PI * macroWaveCount * cycleProgress
+    const prevWavePhase = 2 * Math.PI * macroWaveCount * Math.max(0, cycleProgress - 0.001)
+    const waveTrend = (Math.sin(wavePhase) - Math.sin(prevWavePhase)) * macroWeeklyAmplitudeRatio
     
-    // 3. 周内波浪因子（平滑正弦波，范围 -1 到 +1）
-    const waveFrequency = macroWaveCount
-    const weeklyAmplitudeRatio = macroWeeklyAmplitudeRatio
-    const waveFactor = Math.sin(2 * Math.PI * waveFrequency * cycleProgress) * weeklyAmplitudeRatio
+    // ============================================================
+    // 6. 合成收益率并计算新价格
+    // ============================================================
+    // 总收益率 = 漂移 + 随机 + 形态偏置 + 波浪趋势
+    const totalReturn = driftReturn + randomReturn + patternBias + waveTrend
     
-    // 4. 随机噪音因子
-    const noiseFactor = (Math.random() * 2 - 1) * 0.001 // ±0.1%
+    // 使用几何收益率计算新价格（保证价格始终为正）
+    let newPrice = currentPrice * (1 + totalReturn)
     
-    // === 百分比合成最终价格 ===
-    // 所有波动以百分比形式叠加在趋势价格上
-    let newPrice = trendPrice * (1 + dailyFactor + waveFactor + noiseFactor)
-    
-    // === 严格的±50%限幅（相对于周期起始价和日开盘价双重限制） ===
+    // ============================================================
+    // 7. 涨跌幅限制（相对于周期起始价和日开盘价）
+    // ============================================================
     const dayBase = dailyOpenPrice ?? basePrice
     const weekUpper = basePrice * 1.5
     const weekLower = basePrice * 0.5
     const dayUpper = dayBase * 1.5
     const dayLower = dayBase * 0.5
     
-    // 取两者的交集（更严格的限制）
     const upperLimit = Math.min(weekUpper, dayUpper)
     const lowerLimit = Math.max(weekLower, dayLower)
+    
+    // 软着陆：接近限幅时逐渐减缓而非硬切
+    if (newPrice > upperLimit * 0.95) {
+      const overshoot = (newPrice - upperLimit * 0.95) / (upperLimit * 0.05)
+      newPrice = upperLimit * 0.95 + (upperLimit * 0.05) * Math.tanh(overshoot)
+    }
+    if (newPrice < lowerLimit * 1.05) {
+      const undershoot = (lowerLimit * 1.05 - newPrice) / (lowerLimit * 0.05)
+      newPrice = lowerLimit * 1.05 - (lowerLimit * 0.05) * Math.tanh(undershoot)
+    }
     
     newPrice = Math.max(lowerLimit, Math.min(upperLimit, newPrice))
     
@@ -657,9 +714,6 @@ export function apply(ctx: Context, config: Config) {
     newPrice = Number(newPrice.toFixed(2))
     currentPrice = newPrice
     await ctx.database.create('bourse_history', { stockId, price: newPrice, time: new Date() })
-    
-    // 清理过旧历史（保留3天）
-    // await ctx.database.remove('bourse_history', { time: { $lt: new Date(now.getTime() - 3 * 24 * 3600 * 1000) } })
   }
 
   // --- 交易处理逻辑 ---
@@ -1049,7 +1103,7 @@ export function apply(ctx: Context, config: Config) {
       return '已切换K线模型。'
     })
 
-  // // // --- 开发测试命令 ---
+  // // --- 开发测试命令 ---
   // ctx.command('bourse.test.price [ticks:number]', '开发测试：推进价格更新若干次并返回当前价格', { authority: 3 })
   //   .action(async ({ session }, ticks?) => {
   //     const n = typeof ticks === 'number' && ticks > 0 ? Math.min(ticks, 500) : 1
@@ -1057,19 +1111,6 @@ export function apply(ctx: Context, config: Config) {
   //       await updatePrice()
   //     }
   //     return `测试完成：推进${n}次；当前价格：${Number(currentPrice.toFixed(2))}`
-  //   })
-
-  // ctx.command('bourse.test.clamp <percent:number>', '开发测试：尝试目标涨跌幅并查看限幅结果', { authority: 3 })
-  //   .action(async ({ session }, percent) => {
-  //     if (typeof percent !== 'number') return '请输入百分比（例如 60 或 -40）'
-  //     const baseStart = (await ctx.database.get('bourse_state', { key: 'macro_state' }))[0]?.startPrice ?? currentPrice
-  //     const dayBase = dailyOpenPrice ?? baseStart
-  //     const upper = Math.min(baseStart * 1.5, dayBase * 1.5)
-  //     const lower = Math.max(baseStart * 0.5, dayBase * 0.5)
-  //     const expected = currentPrice * (1 + percent / 100)
-  //     const clamped = Math.max(lower, Math.min(upper, expected))
-  //     const hint = clamped !== expected ? `（已按±50%限幅从${Number(expected.toFixed(2))}调整为${Number(clamped.toFixed(2))}）` : ''
-  //     return `测试限幅：当前价=${Number(currentPrice.toFixed(2))}；期望=${Number(expected.toFixed(2))}；结果=${Number(clamped.toFixed(2))}${hint}`
   //   })
 
   // --- 渲染逻辑 ---
