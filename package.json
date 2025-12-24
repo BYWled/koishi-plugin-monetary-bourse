@@ -1,6 +1,6 @@
 {
   "name": "koishi-plugin-monetary-bourse",
-  "version": "1.1.2-Alpha.5",
+  "version": "1.1.2-Alpha.6",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
   "files": [
