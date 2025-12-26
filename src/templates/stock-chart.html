@@ -1,0 +1,469 @@
+<html>
+<head>
+  <style>
+    :root {
+      --main-color: {{MAIN_COLOR}};
+      --glow-color: {{GLOW_COLOR}};
+      --icon-gradient-start: {{ICON_GRADIENT_START}};
+      --icon-gradient-end: {{ICON_GRADIENT_END}};
+      --icon-shadow: {{ICON_SHADOW}};
+      --change-badge-bg: {{CHANGE_BADGE_BG}};
+      
+      /* 优化后的配色板 */
+      --bg-color: #0c0f15;
+      --card-bg: #151921;
+      --text-primary: #e1e3e6;
+      --text-secondary: #8b919e;
+      --border-color: #232730;
+      --grid-line-color: #232730;
+    }
+    
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    
+    body { 
+      padding: 32px; 
+      /* 字体栈优化：优先使用现代系统字体 */
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
+      background-color: var(--bg-color);
+      
+      /* 强制 4:3 比例 (1024x768) */
+      width: 1024px; 
+      height: 768px;
+      
+      color: var(--text-primary);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      overflow: hidden; /* 防止溢出 */
+    }
+    
+    .card { 
+      background-color: var(--card-bg);
+      width: 100%;
+      height: 100%;
+      padding: 36px 48px; 
+      border-radius: 24px; 
+      box-shadow: 0 24px 48px rgba(0, 0, 0, 0.5), inset 0 1px 1px rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-color);
+      position: relative; /* ensure absolute children like .update-time are positioned inside the card */
+      display: flex;
+      flex-direction: column;
+    }
+    
+    /* 头部区域优化 */
+    .header { 
+      display: flex; 
+      justify-content: space-between; 
+      align-items: flex-start; 
+      margin-bottom: 24px;
+      flex-shrink: 0; /* 防止头部被压缩 */
+    }
+    
+    .title-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    
+    .stock-name {
+      font-size: 42px;
+      font-weight: 700;
+      color: #ffffff;
+      letter-spacing: -0.5px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    
+    .stock-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, var(--icon-gradient-start), var(--icon-gradient-end));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      box-shadow: 0 8px 20px var(--icon-shadow);
+    }
+    
+    .meta-info {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      font-size: 15px;
+      color: var(--text-secondary);
+      font-weight: 500;
+      margin-left: 60px; /* 对齐文字 */
+    }
+    
+    .meta-item { display: flex; align-items: center; gap: 6px; }
+    .live-dot { width: 6px; height: 6px; background-color: #22c55e; border-radius: 50%; box-shadow: 0 0 8px #22c55e; }
+    
+    .price-group {
+      text-align: right;
+    }
+    
+    .current-price {
+      font-family: 'Trebuchet MS', monospace;
+      font-size: 64px;
+      font-weight: normal;
+      color: var(--main-color);
+      line-height: 1;
+      letter-spacing: -2px;
+    }
+    
+    .price-change {
+      margin-top: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 12px;
+    }
+    
+    .change-badge {
+      background-color: var(--change-badge-bg);
+      color: var(--main-color);
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 16px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    
+    /* 图表区域优化：自适应高度 */
+    .chart-wrapper {
+      position: relative;
+      flex: 1; /* 占据剩余所有空间 */
+      width: 100%;
+      min-height: 0; /* Flexbox 溢出修复 */
+      margin: 16px 0;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%; /* 填满 wrapper */
+    }
+    
+    /* 底部数据栏优化 */
+    .footer {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      background: var(--card-bg); /* 改为背景色，通过 border 分割 */
+      border-top: 1px solid var(--border-color);
+      margin-top: auto; /* 推到底部 */
+      padding-top: 24px;
+      flex-shrink: 0;
+    }
+    
+    .stat-box {
+      padding: 0 24px;
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid var(--border-color);
+    }
+    .stat-box:last-child { border-right: none; }
+    
+    .stat-label {
+      font-size: 13px;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      margin-bottom: 6px;
+      letter-spacing: 0.5px;
+      font-weight: 600;
+    }
+    
+    .stat-value {
+      font-size: 20px;
+      font-weight: 600;
+      color: var(--text-primary);
+      font-family: 'Roboto Mono', monospace;
+      letter-spacing: -0.5px;
+    }
+    
+    .update-time {
+      position: absolute;
+      bottom: 8px;
+      right: 8px;
+      font-size: 12px;
+      color: var(--text-secondary);
+      opacity: 0.9;
+      z-index: 2; /* make sure it's above footer */
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="header">
+      <div class="title-group">
+        <div class="stock-name">
+          <div class="stock-icon">⚡</div>
+          {{STOCK_NAME}}
+        </div>
+        <div class="meta-info">
+          <div class="meta-item"><div class="live-dot"></div> {{VIEW_LABEL}}</div>
+          <div class="meta-item" style="opacity: 0.5">|</div>
+          <div class="meta-item">{{CURRENT_TIME}}</div>
+        </div>
+      </div>
+      <div class="price-group">
+        <div class="current-price">{{CURRENT_PRICE}}</div>
+        <div class="price-change">
+          <span style="font-size: 18px; font-weight: 600; color: var(--main-color); opacity: 0.9;">{{CHANGE_VALUE}}</span>
+          <span class="change-badge">{{CHANGE_ICON}} {{CHANGE_PERCENT}}%</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="chart-wrapper">
+      <!-- 增加 Canvas 分辨率以保证清晰度，CSS 会将其缩小显示 -->
+      <canvas id="chart" width="1856" height="900"></canvas>
+    </div>
+
+    <div class="footer">
+      <div class="stat-box">
+        <div class="stat-label">最高 High</div>
+        <div class="stat-value">{{HIGH_PRICE}}</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">最低 Low</div>
+        <div class="stat-value">{{LOW_PRICE}}</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">开盘 Open</div>
+        <div class="stat-value">{{START_PRICE}}</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">振幅 Amp</div>
+        <div class="stat-value">{{AMPLITUDE}}%</div>
+      </div>
+    </div>
+    <div class="update-time">数据更新于 {{UPDATE_TIME}}</div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('chart');
+    const ctx = canvas.getContext('2d');
+    
+    // 数据注入
+    const prices = JSON.parse('{{PRICES}}');
+    const times = JSON.parse('{{TIMES}}');
+    const timestamps = JSON.parse('{{TIMESTAMPS}}');
+    
+    // 布局参数 - 适配新的 Canvas 尺寸
+    const W = canvas.width;
+    const H = canvas.height;
+    // 调整内边距，给字体更多呼吸空间
+    const padding = { top: 60, bottom: 80, left: 20, right: 160 };
+    
+    // 数据计算
+    const maxPrice = Math.max(...prices);
+    const minPrice = Math.min(...prices);
+    const priceRange = maxPrice - minPrice || 1;
+    // 增加上下留白 (20%) 让曲线更平缓美观
+    const yMin = minPrice - priceRange * 0.2;
+    const yMax = maxPrice + priceRange * 0.2;
+    const yRange = yMax - yMin;
+    
+    const tStart = timestamps[0];
+    const tEnd = timestamps[timestamps.length - 1];
+    const tRange = tEnd - tStart || 1;
+    
+    // 坐标映射函数
+    const getX = t => padding.left + ((t - tStart) / tRange) * (W - padding.left - padding.right);
+    const getY = p => H - padding.bottom - ((p - yMin) / yRange) * (H - padding.top - padding.bottom);
+    
+    // 1. 绘制网格线 (Grid) - 样式优化：更细、更淡
+    ctx.strokeStyle = 'rgba(42, 46, 57, 0.6)'; 
+    ctx.lineWidth = 2;
+    ctx.setLineDash([8, 8]); // 更稀疏的虚线
+    
+    const gridCount = 4; // 减少网格线数量，更简洁
+    for (let i = 0; i <= gridCount; i++) {
+      const y = H - padding.bottom - (i / gridCount) * (H - padding.top - padding.bottom);
+      
+      // 只画横线
+      ctx.beginPath();
+      ctx.moveTo(padding.left, y);
+      ctx.lineTo(W - padding.right, y);
+      ctx.stroke();
+      
+      // Y轴标签 - 字体优化：变小、颜色变淡、更现代
+      const val = yMin + (i / gridCount) * yRange;
+      ctx.fillStyle = '#64748b'; // Slate-500
+      // 修改字体：使用 Trebuchet MS，尺寸调整
+      ctx.font = '500 28px "Trebuchet MS", monospace'; 
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      // 增加一点左边距
+      ctx.fillText(val.toFixed(2), W - padding.right + 24, y);
+    }
+    ctx.setLineDash([]);
+    
+    // 2. 准备路径点
+    const points = prices.map((p, i) => ({
+      x: getX(timestamps[i]),
+      y: getY(p)
+    }));
+    
+    // 3. 绘制渐变填充 (Area)
+    const gradient = ctx.createLinearGradient(0, padding.top, 0, H - padding.bottom);
+    // 使用 hex 转 rgba 模拟透明度变化 (这里假设 main color 逻辑在后端处理，此处使用 css 变量占位符不太好操作 canvas 渐变，
+    // 但保留原逻辑即可，因为 placeholder 会被替换)
+    gradient.addColorStop(0, '{{GRADIENT_START}}');
+    gradient.addColorStop(1, 'rgba(0,0,0,0)'); // 透明结尾
+    
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, H - padding.bottom);
+    
+    if (points.length > 1) {
+      ctx.lineTo(points[0].x, points[0].y);
+      for (let i = 0; i < points.length - 1; i++) {
+        const p0 = points[i];
+        const p1 = points[i + 1];
+        const midX = (p0.x + p1.x) / 2;
+        const midY = (p0.y + p1.y) / 2;
+        ctx.quadraticCurveTo(p0.x, p0.y, midX, midY);
+      }
+      const last = points[points.length - 1];
+      ctx.lineTo(last.x, last.y);
+    }
+    
+    ctx.lineTo(points[points.length - 1].x, H - padding.bottom);
+    ctx.closePath();
+    ctx.fillStyle = gradient;
+    ctx.fill();
+    
+    // 4. 绘制主线 (Line)
+    ctx.beginPath();
+    ctx.lineWidth = 6; // 线条加粗一点点
+    ctx.strokeStyle = '{{MAIN_COLOR}}';
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    
+    if (points.length > 1) {
+      ctx.moveTo(points[0].x, points[0].y);
+      for (let i = 0; i < points.length - 1; i++) {
+        const p0 = points[i];
+        const p1 = points[i + 1];
+        const midX = (p0.x + p1.x) / 2;
+        const midY = (p0.y + p1.y) / 2;
+        ctx.quadraticCurveTo(p0.x, p0.y, midX, midY);
+      }
+      ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
+    }
+    ctx.stroke();
+    
+    // 5. 绘制当前价格指示线 (Crosshair Line)
+    const lastPoint = points[points.length - 1];
+    ctx.beginPath();
+    ctx.setLineDash([4, 6]); // 更紧密的点状线
+    ctx.strokeStyle = '{{MAIN_COLOR}}';
+    ctx.lineWidth = 2;
+    ctx.moveTo(padding.left, lastPoint.y);
+    ctx.lineTo(W - padding.right, lastPoint.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    
+    // 6. 绘制当前价格标签 (Price Label)
+    const currentPriceStr = prices[prices.length - 1].toFixed(2);
+    // 标签字体优化
+    ctx.font = 'bold 32px "Trebuchet MS", monospace';
+    const textMetrics = ctx.measureText(currentPriceStr);
+    const labelPadX = 24;
+    const labelPadY = 16;
+    const labelWidth = textMetrics.width + (labelPadX * 2);
+    const labelHeight = 52;
+    const labelX = W - padding.right;
+    const labelY = lastPoint.y - labelHeight / 2;
+    
+    // 标签背景
+    ctx.fillStyle = '{{MAIN_COLOR}}';
+    ctx.beginPath();
+    ctx.roundRect(labelX, labelY, labelWidth, labelHeight, 8); // 圆角更大
+    ctx.fill();
+    
+    // 标签文字
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(currentPriceStr, labelX + labelPadX, lastPoint.y + 2);
+    
+    // 7. 绘制呼吸灯圆点
+    const glow = ctx.createRadialGradient(lastPoint.x, lastPoint.y, 0, lastPoint.x, lastPoint.y, 40);
+    glow.addColorStop(0, '{{GLOW_COLOR}}');
+    glow.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(lastPoint.x, lastPoint.y, 40, 0, Math.PI * 2);
+    ctx.fill();
+    
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(lastPoint.x, lastPoint.y, 8, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // 8. X轴时间标签 (Time Labels) - 字体与布局优化
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = '#64748b'; // Slate-500
+    // 修改字体：System UI font, lighter weight
+    ctx.font = '500 24px -apple-system, BlinkMacSystemFont, "Inter", sans-serif';
+    
+    const occupied = [];
+    const addLabel = (text, x) => {
+        const w = ctx.measureText(text).width;
+        const left = x - w / 2;
+        const right = x + w / 2;
+        for (const r of occupied) {
+            if (left < r.right + 40 && right > r.left - 40) return false; // 增加间距判断
+        }
+        if (left < 0 || right > W) return false;
+        
+        occupied.push({ left, right });
+        ctx.fillText(text, x, H - padding.bottom + 24); // 下移一点
+        return true;
+    };
+
+    // 逻辑保持不变，但参数微调
+    addLabel(times[0], getX(timestamps[0]));
+    
+    const lastIdx = times.length - 1;
+    if (lastIdx > 0) {
+        const lastX = getX(timestamps[lastIdx]);
+        const lastText = times[lastIdx];
+        const lastW = ctx.measureText(lastText).width;
+        const lastRect = { left: lastX - lastW/2, right: lastX + lastW/2 };
+        
+        const totalW = W - padding.left - padding.right;
+        const singleW = ctx.measureText("00:00").width + 80;
+        const maxCount = Math.floor(totalW / singleW);
+        const step = Math.max(1, Math.ceil((times.length - 2) / (maxCount - 2)));
+
+        for (let i = step; i < lastIdx; i += step) {
+            if (i >= lastIdx) break;
+            const x = getX(timestamps[i]);
+            const text = times[i];
+            const w = ctx.measureText(text).width;
+            const left = x - w/2;
+            const right = x + w/2;
+            let hit = false;
+            for (const r of occupied) {
+                 if (left < r.right + 40 && right > r.left - 40) hit = true;
+            }
+            if (left < lastRect.right + 40 && right > lastRect.left - 40) hit = true;
+            
+            if (!hit) {
+                addLabel(text, x);
+            }
+        }
+        ctx.fillText(lastText, lastX, H - padding.bottom + 24);
+    }
+  </script>
+</body>
+</html>
