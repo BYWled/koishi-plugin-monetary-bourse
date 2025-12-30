@@ -893,7 +893,8 @@ export function apply(ctx: Context, config: Config) {
     const morningVol = Math.exp(-8 * dayProgress)
     const afternoonVol = Math.exp(-8 * (1 - dayProgress))
     const volatility = 0.3 + morningVol * 0.5 + afternoonVol * 0.4
-    const randomReturn = normalRandom * 0.002 * volatility
+    // 提升随机扰动强度，让实时曲线更有呼吸感
+    const randomReturn = normalRandom * 0.0035 * volatility
 
     // ============================================================
     // 4. 合成总收益率
@@ -977,6 +978,22 @@ export function apply(ctx: Context, config: Config) {
       }
       await ctx.database.remove('bourse_pending', { id: txn.id })
     }
+  }
+
+  // 统一获取价格历史，便于渲染成交/挂单回单
+  async function getPriceHistory(limit = 100) {
+    const historyData = await ctx.database.get('bourse_history', { 
+      stockId 
+    }, { 
+      sort: { time: 'desc' }, 
+      limit 
+    })
+
+    return historyData.reverse().map(h => ({
+      time: new Date(h.time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+      price: h.price,
+      timestamp: new Date(h.time).getTime()
+    }))
   }
 
   // --- 命令定义 ---
@@ -1105,26 +1122,17 @@ export function apply(ctx: Context, config: Config) {
         endTime
       })
 
+      const tradeMeta = freezeMinutes === 0
+        ? { status: 'settled' as const, pendingMinutes: 0, pendingEndTime: null as string | null }
+        : { status: 'pending' as const, pendingMinutes: freezeMinutes, pendingEndTime: endTime.toLocaleString('zh-CN') }
+
       // 如果冻结时间为0，立即处理挂单（不等待定时任务）
       if (freezeMinutes === 0) {
         await processPendingTransactions()
-        
-        // 获取价格历史数据用于图表
-        const historyData = await ctx.database.get('bourse_history', 
-          { stockId }, 
-          { sort: { time: 'asc' }, limit: 100 }
-        )
-        const priceHistory = historyData.map(h => ({
-          time: new Date(h.time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
-          price: h.price,
-          timestamp: new Date(h.time).getTime()
-        }))
-        
-        // 获取买入后的持仓数量
+        const priceHistory = await getPriceHistory()
         const newHoldingData = await ctx.database.get('bourse_holding', { userId: visibleUserId, stockId })
         const newHoldingAmount = newHoldingData.length > 0 ? newHoldingData[0].amount : amount
-        
-        // 渲染交易结果图片
+
         return await renderTradeResultImage(
           ctx,
           'buy',
@@ -1134,12 +1142,30 @@ export function apply(ctx: Context, config: Config) {
           cost,
           config.currency,
           priceHistory,
-          undefined, // 买入无需卖出信息
-          newHoldingAmount
+          undefined,
+          newHoldingAmount,
+          tradeMeta
         )
       }
 
-      return `交易申请已提交！\n花费: ${cost.toFixed(2)} ${config.currency}\n冻结时间: ${freezeMinutes.toFixed(1)}分钟\n股票将在解冻后到账。`
+      // 有冻结也返回回单，提示预计完成时间
+      const priceHistory = await getPriceHistory()
+      const existingHolding = await ctx.database.get('bourse_holding', { userId: visibleUserId, stockId })
+      const projectedHolding = (existingHolding.length > 0 ? existingHolding[0].amount : 0) + amount
+
+      return await renderTradeResultImage(
+        ctx,
+        'buy',
+        config.stockName,
+        amount,
+        currentPrice,
+        cost,
+        config.currency,
+        priceHistory,
+        undefined,
+        projectedHolding,
+        tradeMeta
+      )
     })
 
   ctx.command('stock.sell <amount:number>', '卖出股票')
@@ -1221,27 +1247,19 @@ export function apply(ctx: Context, config: Config) {
         endTime
       })
 
+      const hasCostRecord = existingTotalCost > 0
+      const profit = hasCostRecord ? Number((gain - soldCost).toFixed(2)) : null
+      const profitPercent = hasCostRecord && soldCost > 0 ? Number(((profit / soldCost) * 100).toFixed(2)) : null
+
+      const tradeMeta = freezeMinutes === 0
+        ? { status: 'settled' as const, pendingMinutes: 0, pendingEndTime: null as string | null }
+        : { status: 'pending' as const, pendingMinutes: freezeMinutes, pendingEndTime: endTime.toLocaleString('zh-CN') }
+
       // 如果冻结时间为0，立即处理挂单（不等待定时任务）
       if (freezeMinutes === 0) {
         await processPendingTransactions()
-        
-        // 获取价格历史数据用于图表
-        const historyData = await ctx.database.get('bourse_history', 
-          { stockId }, 
-          { sort: { time: 'asc' }, limit: 100 }
-        )
-        const priceHistory = historyData.map(h => ({
-          time: new Date(h.time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
-          price: h.price,
-          timestamp: new Date(h.time).getTime()
-        }))
-        
-        // 计算盈亏信息（使用之前计算的 avgCostPerShare 和 soldCost）
-        const hasCostRecord = existingTotalCost > 0
-        const profit = hasCostRecord ? Number((gain - soldCost).toFixed(2)) : null
-        const profitPercent = hasCostRecord && soldCost > 0 ? Number(((profit / soldCost) * 100).toFixed(2)) : null
-        
-        // 渲染交易结果图片
+        const priceHistory = await getPriceHistory()
+
         return await renderTradeResultImage(
           ctx,
           'sell',
@@ -1256,11 +1274,32 @@ export function apply(ctx: Context, config: Config) {
             buyCost: hasCostRecord ? soldCost : null,
             profit,
             profitPercent
-          }
+          },
+          undefined,
+          tradeMeta
         )
       }
 
-      return `卖出挂单已提交！\n预计收益: ${gain.toFixed(2)} ${config.currency}\n资金冻结: ${freezeMinutes.toFixed(1)}分钟\n资金将在解冻后到账。`
+      const priceHistory = await getPriceHistory()
+
+      return await renderTradeResultImage(
+        ctx,
+        'sell',
+        config.stockName,
+        amount,
+        currentPrice,
+        gain,
+        config.currency,
+        priceHistory,
+        {
+          avgBuyPrice: hasCostRecord ? avgCostPerShare : null,
+          buyCost: hasCostRecord ? soldCost : null,
+          profit,
+          profitPercent
+        },
+        undefined,
+        tradeMeta
+      )
     })
 
   ctx.command('stock.my', '我的持仓')
@@ -1552,7 +1591,12 @@ export function apply(ctx: Context, config: Config) {
       profitPercent: number | null // 盈亏百分比
     },
     // 买入后的持仓数量
-    newHolding?: number
+    newHolding?: number,
+    tradeMeta?: {
+      status?: 'pending' | 'settled'
+      pendingMinutes?: number
+      pendingEndTime?: string | null
+    }
   ) {
     const fs = require('fs')
     const path = require('path')
@@ -1561,6 +1605,9 @@ export function apply(ctx: Context, config: Config) {
 
     // 找到交易发生的时间点索引（最新的价格点）
     const tradeIndex = priceHistory.length - 1
+    const status = tradeMeta?.status ?? 'settled'
+    const pendingMinutes = tradeMeta?.pendingMinutes ?? 0
+    const pendingEndTime = tradeMeta?.pendingEndTime ?? null
 
     // 准备数据对象
     const data = {
@@ -1580,7 +1627,10 @@ export function apply(ctx: Context, config: Config) {
       profit: sellInfo?.profit ?? null,
       profitPercent: sellInfo?.profitPercent ?? null,
       // 买入后持仓
-      newHolding: newHolding ?? amount
+      newHolding: newHolding ?? amount,
+      status,
+      pendingMinutes,
+      pendingEndTime
     }
 
     template = template.replace('{{DATA}}', JSON.stringify(data))

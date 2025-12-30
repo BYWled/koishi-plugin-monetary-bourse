@@ -21,7 +21,7 @@
     body { 
       margin: 0; 
       padding: 24px; 
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+      font-family: 'Roboto Mono', 'Trebuchet MS', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
       background-color: var(--bg-color); 
       width: 480px; 
       box-sizing: border-box; 
@@ -128,6 +128,7 @@
       display: flex;
       align-items: center;
       gap: 8px;
+      letter-spacing: -0.2px;
     }
     .stock-amount {
       font-size: 13px;
@@ -136,6 +137,7 @@
       color: var(--text-primary);
       padding: 4px 10px;
       border-radius: 6px;
+      font-family: 'Roboto Mono', 'Trebuchet MS', monospace;
     }
     
     .stock-body { padding: 24px; }
@@ -151,7 +153,8 @@
       font-size: 18px; 
       font-weight: 600; 
       color: var(--text-primary); 
-      font-family: 'Roboto Mono', monospace;
+      font-family: 'Roboto Mono', 'Trebuchet MS', monospace;
+      letter-spacing: -0.3px;
     }
     .stat-value.highlight { color: var(--accent-color); }
 
@@ -252,6 +255,13 @@
   <script>
     // 从 JSON 标签中读取数据
     const DATA = JSON.parse(document.getElementById('data-source').textContent);
+
+    // 统一字体：数字和金额统一使用与其他页面一致的等宽字体
+    const monoTargets = document.querySelectorAll('.stat-value, .profit-value, .pending-amount, .pending-price, .pending-cost, .pending-type, .stock-amount')
+    monoTargets.forEach(el => {
+      el.style.fontFamily = "'Roboto Mono','Trebuchet MS','Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif"
+      el.style.letterSpacing = '-0.2px'
+    })
 
     // 渲染用户信息
     document.getElementById('avatar').textContent = DATA.username.charAt(0).toUpperCase();
