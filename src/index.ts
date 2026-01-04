@@ -98,6 +98,8 @@ export interface Config {
   maxFreezeTime: number // 最大冻结时间（分钟）
   // 股市开关
   marketStatus: 'open' | 'close' | 'auto'
+  // 开发者选项
+  enableDebug: boolean
 }
 
 export const Config: Schema<Config> = Schema.intersect([
@@ -122,6 +124,10 @@ export const Config: Schema<Config> = Schema.intersect([
     minFreezeTime: Schema.number().min(0).default(10).description('最小冻结时间(分钟)'),
     maxFreezeTime: Schema.number().min(0).default(1440).description('最大交易冻结时间(分钟)'),
   }).description('冻结机制'),
+
+  Schema.object({
+    enableDebug: Schema.boolean().default(false).description('启用调试模式（开启后可使用调试指令）'),
+  }).description('开发者选项'),
 ])
 
 // --- 核心实现 ---
@@ -190,6 +196,8 @@ export function apply(ctx: Context, config: Config) {
   let macroWeeklyAmplitudeRatio = 0.08
   // 随机自动宏观目标刷新时间
   let nextMacroSwitchTime: Date | null = null
+  // 内部测试用：虚拟时间（存在则以此为准，不使用系统时间）
+  let __testNow: Date | null = null
 
   // 市场定时任务（每 2 分钟运行一次）
   ctx.setInterval(async () => {
@@ -534,7 +542,7 @@ export function apply(ctx: Context, config: Config) {
   async function updatePrice() {
     // 获取当前调控状态
     let state = (await ctx.database.get('bourse_state', { key: 'macro_state' }))[0]
-    const now = new Date()
+    const now = __testNow ?? new Date()
 
     // 确保时间类型正确
     if (state) {
@@ -545,13 +553,13 @@ export function apply(ctx: Context, config: Config) {
       if (!(state.endTime instanceof Date)) state.endTime = new Date(state.endTime)
     }
 
-    // 状态初始化或过期检查
+    // 状态初始化或过期检查（手动与自动到期都应切换为自动新周期）
     let needNewState = false
     if (!state) {
       needNewState = true
     } else {
       const endTime = state.endTime || new Date(state.lastCycleStart.getTime() + 7 * 24 * 3600 * 1000)
-      if (state.mode !== 'manual' && now > endTime) needNewState = true
+      if (now > endTime) needNewState = true
     }
 
     const createAutoState = async () => {
@@ -618,15 +626,19 @@ export function apply(ctx: Context, config: Config) {
     const dayProgress = Math.max(0, Math.min(1, dayElapsed / dayDuration))
 
     // ============================================================
-    // 1. 宏观漂移项（Drift）- 向目标价格的均值回归
+    // 1. 宏观漂移项（Drift）- 向目标价格的均值回归（融入周波浪）
     // ============================================================
-    // 使用均值回归模型：价格会缓慢向"当前应有价格"回归
-    // 当前应有价格 = 基准价 → 目标价的线性插值
-    const expectedPrice = basePrice + (targetPrice - basePrice) * cycleProgress
+    // 当前应有价格 = 基准价 → 目标价的线性插值，并叠加周波浪偏置（对目标的轻微偏移）
+    const expectedBase = basePrice + (targetPrice - basePrice) * cycleProgress
+    // 周期波浪以偏置形式作用于“应有价格”，而非直接作为收益项
+    const wavePhaseForMean = 2 * Math.PI * macroWaveCount * cycleProgress
+    const weeklyAmplitudeRatioForMean = Math.min(Math.max(macroWeeklyAmplitudeRatio, 0.04), 0.12) // 收敛至4%-12%（增强波浪感）
+    const waveMeanBias = Math.sin(wavePhaseForMean) * weeklyAmplitudeRatioForMean
+    const expectedPrice = expectedBase * (1 + waveMeanBias)
     
     // 回归力度：价格偏离越大，回归力越强
     const deviation = (expectedPrice - currentPrice) / currentPrice
-    const meanReversionStrength = 0.02 // 每次更新回归2%的偏差
+    const meanReversionStrength = 0.05 // 增强回归强度（每tick回归5%的偏差）
     const driftReturn = deviation * meanReversionStrength
 
     // ============================================================
@@ -652,8 +664,8 @@ export function apply(ctx: Context, config: Config) {
     const u2 = Math.random()
     const normalRandom = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2)
     
-    // 基础波动幅度（每2分钟约0.15%的标准差）
-    const baseVolatilityPerTick = 0.0015
+    // 基础波动幅度（每2分钟约0.25%的标准差，增强波动感）
+    const baseVolatilityPerTick = 0.0025
     const randomReturn = normalRandom * baseVolatilityPerTick * volatility
 
     // ============================================================
@@ -663,22 +675,14 @@ export function apply(ctx: Context, config: Config) {
     const patternFn = kLinePatterns[currentDayPattern]
     const patternValue = patternFn(dayProgress)
     const prevPatternValue = patternFn(Math.max(0, dayProgress - 0.01))
-    const patternTrend = (patternValue - prevPatternValue) * 0.5 // 形态变化的方向
-    const patternBias = patternTrend * 0.003 // 转化为微小的收益率偏置
+    const patternTrend = (patternValue - prevPatternValue) * 0.8 // 形态变化的方向（增强）
+    const patternBias = patternTrend * 0.008 // 转化为更显著的收益率偏置
 
     // ============================================================
-    // 5. 周期波浪项 - 中期波动
+    // 5/6. 合成收益率并计算新价格（移除波浪收益项，波浪已作用于均值目标）
     // ============================================================
-    // 在宏观趋势上叠加周期性波动，模拟市场情绪周期
-    const wavePhase = 2 * Math.PI * macroWaveCount * cycleProgress
-    const prevWavePhase = 2 * Math.PI * macroWaveCount * Math.max(0, cycleProgress - 0.001)
-    const waveTrend = (Math.sin(wavePhase) - Math.sin(prevWavePhase)) * macroWeeklyAmplitudeRatio
-    
-    // ============================================================
-    // 6. 合成收益率并计算新价格
-    // ============================================================
-    // 总收益率 = 漂移 + 随机 + 形态偏置 + 波浪趋势
-    const totalReturn = driftReturn + randomReturn + patternBias + waveTrend
+    // 总收益率 = 漂移 + 随机 + 形态偏置
+    const totalReturn = driftReturn + randomReturn + patternBias
     
     // 使用几何收益率计算新价格（保证价格始终为正）
     let newPrice = currentPrice * (1 + totalReturn)
@@ -828,9 +832,9 @@ export function apply(ctx: Context, config: Config) {
       const high = Math.max(...formattedData.map(d => d.price))
       const low = Math.min(...formattedData.map(d => d.price))
       
-      const title = config.stockName + (interval === 'week' ? ' (周走势)' : interval === 'day' ? ' (日走势)' : ' (实时)')
+      const viewLabel = interval === 'week' ? '周走势' : interval === 'day' ? '日走势' : '实时走势'
       
-      const img = await renderStockImage(ctx, formattedData, title, latest.price, high, low)
+      const img = await renderStockImage(ctx, formattedData, config.stockName, viewLabel, latest.price, high, low)
       return img
     })
 
@@ -866,7 +870,17 @@ export function apply(ctx: Context, config: Config) {
         if (freezeMinutes < config.minFreezeTime) freezeMinutes = config.minFreezeTime
       }
       const freezeMs = freezeMinutes * 60 * 1000
-      const endTime = new Date(Date.now() + freezeMs)
+      
+      // 检查用户是否有其他挂单，如果有则排队（由前往后依次读秒）
+      const userPendingOrders = await ctx.database.get('bourse_pending', { userId: visibleUserId }, { sort: { endTime: 'desc' }, limit: 1 })
+      let startTime = new Date()
+      if (userPendingOrders.length > 0) {
+        const lastOrderEndTime = userPendingOrders[0].endTime
+        if (lastOrderEndTime > startTime) {
+          startTime = lastOrderEndTime // 新挂单从上一个挂单结束后开始计时
+        }
+      }
+      const endTime = new Date(startTime.getTime() + freezeMs)
 
       await ctx.database.create('bourse_pending', {
         userId: visibleUserId,
@@ -876,7 +890,7 @@ export function apply(ctx: Context, config: Config) {
         amount,
         price: currentPrice,
         cost,
-        startTime: new Date(),
+        startTime,
         endTime
       })
 
@@ -944,7 +958,17 @@ export function apply(ctx: Context, config: Config) {
         if (freezeMinutes < config.minFreezeTime) freezeMinutes = config.minFreezeTime
       }
       const freezeMs = freezeMinutes * 60 * 1000
-      const endTime = new Date(Date.now() + freezeMs)
+      
+      // 检查用户是否有其他挂单，如果有则排队（由前往后依次读秒）
+      const userPendingOrders = await ctx.database.get('bourse_pending', { userId: visibleUserId }, { sort: { endTime: 'desc' }, limit: 1 })
+      let startTime = new Date()
+      if (userPendingOrders.length > 0) {
+        const lastOrderEndTime = userPendingOrders[0].endTime
+        if (lastOrderEndTime > startTime) {
+          startTime = lastOrderEndTime // 新挂单从上一个挂单结束后开始计时
+        }
+      }
+      const endTime = new Date(startTime.getTime() + freezeMs)
 
       await ctx.database.create('bourse_pending', {
         userId: visibleUserId,
@@ -954,7 +978,7 @@ export function apply(ctx: Context, config: Config) {
         amount,
         price: currentPrice,
         cost: gain,
-        startTime: new Date(),
+        startTime,
         endTime
       })
 
@@ -1025,14 +1049,11 @@ export function apply(ctx: Context, config: Config) {
       const now = new Date()
       const endTime = new Date(now.getTime() + duration * 3600 * 1000)
       
-      // 获取现有状态，保持原有周期基准
-      const existing = (await ctx.database.get('bourse_state', { key: 'macro_state' }))[0]
-      const keepBasePrice = existing?.startPrice ?? currentPrice
-      
-      // 硬性涨跌幅限制（相对周期起始价与当日开盘）：±50%
-      const dayBase = dailyOpenPrice ?? keepBasePrice
-      const upper = Math.min(keepBasePrice * 1.5, dayBase * 1.5)
-      const lower = Math.max(keepBasePrice * 0.5, dayBase * 0.5)
+      // 新的手动调控：开启一个全新周期，避免与旧周期叠加造成停滞
+      const baseStart = currentPrice
+      const dayBase = dailyOpenPrice ?? baseStart
+      const upper = Math.min(baseStart * 1.5, dayBase * 1.5)
+      const lower = Math.max(baseStart * 0.5, dayBase * 0.5)
       const targetPriceClamped = Math.max(lower, Math.min(upper, price))
       
       const minutes = duration * 60
@@ -1040,8 +1061,8 @@ export function apply(ctx: Context, config: Config) {
       
       const newState: BourseState = {
         key: 'macro_state',
-        lastCycleStart: existing?.lastCycleStart ?? now,  // 保持原周期起点
-        startPrice: keepBasePrice,  // 保持原基准价，不重置
+        lastCycleStart: now,          // 开启新周期
+        startPrice: currentPrice,     // 以当前价作为新基准
         targetPrice: targetPriceClamped,
         trendFactor,
         mode: 'manual',
@@ -1049,7 +1070,8 @@ export function apply(ctx: Context, config: Config) {
       }
       
       // 写入数据库
-      if (!existing) {
+      const existing = await ctx.database.get('bourse_state', { key: 'macro_state' })
+      if (existing.length === 0) {
         await ctx.database.create('bourse_state', newState)
       } else {
         const { key, ...updateFields } = newState
@@ -1101,6 +1123,80 @@ export function apply(ctx: Context, config: Config) {
     .action(() => {
       switchKLinePattern('管理员手动')
       return '已切换K线模型。'
+    })
+
+  // --- 开发测试命令（使用虚拟时间推进，需开启 enableDebug） ---
+  ctx.command('bourse.test.price [ticks:number]', '开发测试：推进价格更新若干次并返回当前价格', { authority: 3 })
+    .action(async ({ session }, ticks?) => {
+      if (!config.enableDebug) return '调试模式未开启，请在插件配置中启用 enableDebug。'
+      const n = typeof ticks === 'number' && ticks > 0 ? Math.min(ticks, 500) : 1
+      const stepMs = 2 * 60 * 1000 // 每步2分钟
+      const startNow = new Date()
+      __testNow = new Date(startNow)
+      let minP = currentPrice, maxP = currentPrice
+      for (let i = 0; i < n; i++) {
+        await updatePrice()
+        minP = Math.min(minP, currentPrice)
+        maxP = Math.max(maxP, currentPrice)
+        __testNow = new Date(__testNow.getTime() + stepMs)
+      }
+      __testNow = null
+      return `测试完成：推进${n}步（每步2分钟）\n当前价格：${Number(currentPrice.toFixed(2))}\n区间最高：${Number(maxP.toFixed(2))} 最低：${Number(minP.toFixed(2))}`
+    })
+
+  ctx.command('bourse.test.run <ticks:number> [step:number]', '开发测试：按虚拟时间推进并统计价格分布', { authority: 3 })
+    .action(async ({ session }, ticks, step) => {
+      if (!config.enableDebug) return '调试模式未开启，请在插件配置中启用 enableDebug。'
+      const n = Math.max(1, Math.min(Number(ticks) || 1, 2000))
+      const stepSec = Math.max(10, Math.min(Number(step) || 120, 3600)) // 默认120秒
+      const stepMs = stepSec * 1000
+      const startPrice = currentPrice
+      let minP = startPrice, maxP = startPrice
+      let clampHits = 0
+      const startNow = new Date()
+      __testNow = new Date(startNow)
+      for (let i = 0; i < n; i++) {
+        await updatePrice()
+        const after = currentPrice
+        minP = Math.min(minP, after)
+        maxP = Math.max(maxP, after)
+        // 粗略统计触及限幅（1%以内判为边界命中）
+        const baseStart = (await ctx.database.get('bourse_state', { key: 'macro_state' }))[0]?.startPrice ?? after
+        const dayBase = dailyOpenPrice ?? baseStart
+        const upper = Math.min(baseStart * 1.5, dayBase * 1.5)
+        const lower = Math.max(baseStart * 0.5, dayBase * 0.5)
+        if (after >= upper * 0.99 || after <= lower * 1.01) clampHits++
+        __testNow = new Date(__testNow.getTime() + stepMs)
+      }
+      __testNow = null
+      const drift = Number((currentPrice - startPrice).toFixed(2))
+      return `内部测试\n步数：${n}；步长：${stepSec}s\n起始：${startPrice.toFixed(2)}；结束：${currentPrice.toFixed(2)}（Δ=${drift}）\n最高：${maxP.toFixed(2)}；最低：${minP.toFixed(2)}\n接近限幅次数：${clampHits}`
+    })
+
+  ctx.command('bourse.test.manualThenAuto <target:number> [hours:number] [ticks:number]', '开发测试：手动周期后切回自动的连续性', { authority: 3 })
+    .action(async ({ session }, target, hours, ticks) => {
+      if (!config.enableDebug) return '调试模式未开启，请在插件配置中启用 enableDebug。'
+      const dur = Math.max(1, Math.min(Number(hours) || 6, 48))
+      const n = Math.max(10, Math.min(Number(ticks) || 300, 5000))
+      // 设定手动目标
+      await session?.execute?.(`stock.control ${target} ${dur}`)
+      // 用虚拟时间推进 dur*30 步（2分钟/步 = dur小时）
+      const stepMs = 2 * 60 * 1000
+      __testNow = new Date()
+      for (let i = 0; i < dur * 30; i++) {
+        await updatePrice()
+        __testNow = new Date(__testNow.getTime() + stepMs)
+      }
+      // 再推进 n 步，观察是否仍然运动
+      const before = currentPrice
+      for (let i = 0; i < n; i++) {
+        await updatePrice()
+        __testNow = new Date(__testNow.getTime() + stepMs)
+      }
+      const after = currentPrice
+      __testNow = null
+      const moved = Math.abs(after - before) >= 0.01
+      return `手动→自动 测试\n目标=${target}，期限=${dur}小时\n手动结束价：${before.toFixed(2)}；后续${n}步结束：${after.toFixed(2)}\n是否继续波动：${moved ? '是' : '否（需检查）'}`
     })
 
   // // --- 开发测试命令 ---
@@ -1488,259 +1584,67 @@ export function apply(ctx: Context, config: Config) {
     return h.image(imgBuf, 'image/png')
   }
   
-  async function renderStockImage(ctx: Context, data: {time: string, price: number, timestamp: number}[], name: string, current: number, high: number, low: number) {
+  async function renderStockImage(ctx: Context, data: {time: string, price: number, timestamp: number}[], name: string, viewLabel: string, current: number, high: number, low: number) {
     if (data.length < 2) return '数据不足，无法绘制走势图。'
     
     const startPrice = data[0].price
     const change = current - startPrice
     const changePercent = (change / startPrice) * 100
     const isUp = change >= 0
-    const color = isUp ? '#d93025' : '#188038'
     
-    const points = JSON.stringify(data.map(d => d.price))
-    const times = JSON.stringify(data.map(d => d.time))
-    const timestamps = JSON.stringify(data.map(d => d.timestamp))
+    // 读取 HTML 模板
+    const templatePath = resolve(__dirname, 'templates', 'stock-chart.html')
+    let html = await fs.readFile(templatePath, 'utf-8')
     
-    const html = `
-    <html>
-    <head>
-      <style>
-        body { margin: 0; padding: 20px; font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #f5f7fa; width: 700px; box-sizing: border-box; }
-        .card { background: white; padding: 25px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); }
-        .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; }
-        .title-group { display: flex; flex-direction: column; }
-        .title { font-size: 28px; font-weight: 800; color: #1a1a1a; letter-spacing: -0.5px; }
-        .sub-info { font-size: 14px; color: #888; margin-top: 5px; font-weight: 500; }
-        .price-group { text-align: right; }
-        .price { font-size: 42px; font-weight: 800; color: ${color}; letter-spacing: -1px; line-height: 1; }
-        .change { font-size: 18px; font-weight: 600; color: ${color}; margin-top: 5px; display: flex; align-items: center; justify-content: flex-end; gap: 5px; }
-        .badge { background: #f0f2f5; padding: 4px 8px; border-radius: 6px; font-size: 12px; color: #555; font-weight: 600; }
-        canvas { width: 100%; height: 350px; }
-      </style>
-    </head>
-    <body>
-      <div class="card">
-        <div class="header">
-          <div class="title-group">
-            <div class="title">${name}</div>
-            <div class="sub-info">
-              <span class="badge">High: ${high.toFixed(2)}</span>
-              <span class="badge">Low: ${low.toFixed(2)}</span>
-            </div>
-          </div>
-          <div class="price-group">
-            <div class="price">${current.toFixed(2)}</div>
-            <div class="change">
-              <span>${change >= 0 ? '+' : ''}${change.toFixed(2)}</span>
-              <span>(${changePercent.toFixed(2)}%)</span>
-            </div>
-          </div>
-        </div>
-        <canvas id="chart" width="1300" height="700"></canvas>
-      </div>
-      <script>
-        const canvas = document.getElementById('chart');
-        const ctx = canvas.getContext('2d');
-        const prices = ${points};
-        const times = ${times};
-        const timestamps = ${timestamps};
-        const width = canvas.width;
-        const height = canvas.height;
-        const padding = { top: 20, bottom: 40, left: 40, right: 100 };
-        
-        const max = Math.max(...prices);
-        const min = Math.min(...prices);
-        const range = max - min || 1;
-        const yMin = min - range * 0.1;
-        const yMax = max + range * 0.1;
-        const yRange = yMax - yMin;
-
-        const minTime = timestamps[0];
-        const maxTime = timestamps[timestamps.length - 1];
-        const timeRange = maxTime - minTime || 1;
-
-        function getX(t) { return ((t - minTime) / timeRange) * (width - padding.left - padding.right) + padding.left; }
-        function getY(p) { return height - padding.bottom - ((p - yMin) / yRange) * (height - padding.top - padding.bottom); }
-        
-        // 1. Draw Grid
-        ctx.strokeStyle = '#f0f0f0';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        const gridSteps = 5;
-        for (let i = 0; i <= gridSteps; i++) {
-            const y = height - padding.bottom - (i / gridSteps) * (height - padding.top - padding.bottom);
-            ctx.moveTo(padding.left, y);
-            ctx.lineTo(width - padding.right, y);
-        }
-        ctx.stroke();
-
-        // 2. Draw Area (Gradient Fill)
-        const gradient = ctx.createLinearGradient(0, 0, 0, height);
-        gradient.addColorStop(0, '${isUp ? 'rgba(217, 48, 37, 0.15)' : 'rgba(24, 128, 56, 0.15)'}');
-        gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
-
-        ctx.beginPath();
-        ctx.moveTo(getX(timestamps[0]), height - padding.bottom);
-        // Use Bezier curves for smoothing
-        for (let i = 0; i < prices.length - 1; i++) {
-            const x = getX(timestamps[i]);
-            const y = getY(prices[i]);
-            const nextX = getX(timestamps[i + 1]);
-            const nextY = getY(prices[i + 1]);
-            const cpX = (x + nextX) / 2;
-            if (i === 0) ctx.moveTo(x, y);
-            ctx.quadraticCurveTo(x, y, cpX, (y + nextY) / 2);
-        }
-        // Connect to last point
-        ctx.lineTo(getX(timestamps[prices.length - 1]), getY(prices[prices.length - 1]));
-        
-        // Close path for fill
-        ctx.lineTo(getX(timestamps[prices.length - 1]), height - padding.bottom);
-        ctx.closePath();
-        ctx.fillStyle = gradient;
-        ctx.fill();
-
-        // 3. Draw Line (Smooth)
-        ctx.lineWidth = 4;
-        ctx.lineJoin = 'round';
-        ctx.lineCap = 'round';
-        ctx.strokeStyle = '${color}';
-        ctx.shadowColor = '${isUp ? 'rgba(217, 48, 37, 0.3)' : 'rgba(24, 128, 56, 0.3)'}';
-        ctx.shadowBlur = 10;
-        
-        ctx.beginPath();
-        for (let i = 0; i < prices.length - 1; i++) {
-            const x = getX(timestamps[i]);
-            const y = getY(prices[i]);
-            const nextX = getX(timestamps[i + 1]);
-            const nextY = getY(prices[i + 1]);
-            const cpX = (x + nextX) / 2;
-            if (i === 0) ctx.moveTo(x, y);
-            // Use quadratic curve for simple smoothing between points
-            // Actually, to pass through points, we need a different approach or just straight lines for accuracy.
-            // But for "beautify", slight smoothing is okay. 
-            // A simple smoothing is to use midpoints as control points.
-            // Let's stick to straight lines for accuracy but add shadow/glow.
-            // Or use a simple spline.
-            // Let's revert to straight lines for financial accuracy but keep the glow.
-            ctx.lineTo(nextX, nextY);
-        }
-        ctx.stroke();
-        ctx.shadowBlur = 0;
-
-        // 4. Draw Last Point Marker
-        const lastX = getX(timestamps[prices.length - 1]);
-        const lastY = getY(prices[prices.length - 1]);
-        
-        ctx.beginPath();
-        ctx.arc(lastX, lastY, 6, 0, Math.PI * 2);
-        ctx.fillStyle = 'white';
-        ctx.fill();
-        
-        ctx.beginPath();
-        ctx.arc(lastX, lastY, 4, 0, Math.PI * 2);
-        ctx.fillStyle = '${color}';
-        ctx.fill();
-
-        // 5. Draw Dashed Line to Y-Axis
-        ctx.beginPath();
-        ctx.setLineDash([4, 4]);
-        ctx.strokeStyle = '#ccc';
-        ctx.lineWidth = 1;
-        ctx.moveTo(padding.left, lastY);
-        ctx.lineTo(width - padding.right, lastY);
-        ctx.stroke();
-        ctx.setLineDash([]);
-
-        // 6. Draw Axis Labels
-        ctx.fillStyle = '#999';
-        ctx.font = '600 20px "Segoe UI", sans-serif';
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'middle';
-
-        for (let i = 0; i <= gridSteps; i++) {
-            const val = yMin + (i / gridSteps) * yRange;
-            const y = height - padding.bottom - (i / gridSteps) * (height - padding.top - padding.bottom);
-            ctx.fillText(val.toFixed(2), width - padding.right + 10, y);
-        }
-        
-        ctx.fillStyle = '${color}';
-        ctx.font = 'bold 20px "Segoe UI", sans-serif';
-        ctx.fillText(prices[prices.length-1].toFixed(2), width - padding.right + 10, lastY);
-
-        ctx.textAlign = 'center';
-        ctx.fillStyle = '#999';
-        ctx.font = '500 18px "Segoe UI", sans-serif';
-        
-        // 动态计算标签间隔，防止重叠
-        // 使用最长的时间标签来估算宽度
-        let maxLabelWidth = 0;
-        for (let i = 0; i < times.length; i++) {
-            const w = ctx.measureText(times[i]).width;
-            if (w > maxLabelWidth) maxLabelWidth = w;
-        }
-        const labelWidth = maxLabelWidth + 40; // 加40px间距确保不重叠
-        const availableWidth = width - padding.left - padding.right;
-        const maxLabels = Math.max(2, Math.floor(availableWidth / labelWidth));
-        const labelCount = Math.min(maxLabels, 5); // 最多显示5个标签
-        const timeStep = Math.max(1, Math.ceil(times.length / labelCount));
-        
-        // 选取要绘制的标签索引（均匀分布）
-        const labelIndices = [];
-        for (let i = 0; i < times.length; i += timeStep) {
-           labelIndices.push(i);
-        }
-        // 确保最后一个点在列表中
-        if (labelIndices[labelIndices.length - 1] !== times.length - 1) {
-           labelIndices.push(times.length - 1);
-        }
-        
-        // 绘制标签，跳过重叠的
-        const drawnLabels = [];
-        for (const i of labelIndices) {
-           const x = getX(timestamps[i]);
-           const textWidth = ctx.measureText(times[i]).width;
-           
-           // 根据textAlign计算实际占用的区域
-           let leftEdge, rightEdge;
-           if (i === 0) {
-               leftEdge = x;
-               rightEdge = x + textWidth;
-           } else if (i === times.length - 1) {
-               leftEdge = x - textWidth;
-               rightEdge = x;
-           } else {
-               leftEdge = x - textWidth / 2;
-               rightEdge = x + textWidth / 2;
-           }
-           
-           // 检查是否与已绘制的标签重叠
-           let overlaps = false;
-           for (const drawn of drawnLabels) {
-               // 两个标签之间至少要有15px间隔
-               if (!(rightEdge + 15 < drawn.left || leftEdge - 15 > drawn.right)) {
-                   overlaps = true;
-                   break;
-               }
-           }
-           if (overlaps) continue;
-           
-           if (i === 0) ctx.textAlign = 'left';
-           else if (i === times.length - 1) ctx.textAlign = 'right';
-           else ctx.textAlign = 'center';
-           
-           ctx.fillText(times[i], x, height - 10);
-           drawnLabels.push({ left: leftEdge, right: rightEdge });
-        }
-
-      </script>
-    </body>
-    </html>
-    `
+    // 配色方案：专业金融风格（参考 TradingView）
+    // 涨: #089981 (Green), 跌: #f23645 (Red) - 国际惯例，或者国内惯例 涨红跌绿
+    // 这里保持国内习惯：涨红(#f23645) 跌绿(#089981)
+    const colorScheme = {
+      mainColor: isUp ? '#f23645' : '#089981',
+      gradientStart: isUp ? 'rgba(242, 54, 69, 0.25)' : 'rgba(8, 153, 129, 0.25)',
+      gradientEnd: 'rgba(255, 255, 255, 0)',
+      glowColor: isUp ? 'rgba(242, 54, 69, 0.4)' : 'rgba(8, 153, 129, 0.4)',
+      iconGradientStart: isUp ? '#f23645' : '#089981',
+      iconGradientEnd: isUp ? '#ff7e87' : '#40c2aa',
+      iconShadow: isUp ? 'rgba(242, 54, 69, 0.3)' : 'rgba(8, 153, 129, 0.3)',
+      changeBadgeBg: isUp ? 'rgba(242, 54, 69, 0.12)' : 'rgba(8, 153, 129, 0.12)'
+    }
+    
+    // 替换模板变量
+    const replacements: Record<string, string> = {
+      '{{MAIN_COLOR}}': colorScheme.mainColor,
+      '{{GRADIENT_START}}': colorScheme.gradientStart,
+      '{{GRADIENT_END}}': colorScheme.gradientEnd,
+      '{{GLOW_COLOR}}': colorScheme.glowColor,
+      '{{ICON_GRADIENT_START}}': colorScheme.iconGradientStart,
+      '{{ICON_GRADIENT_END}}': colorScheme.iconGradientEnd,
+      '{{ICON_SHADOW}}': colorScheme.iconShadow,
+      '{{CHANGE_BADGE_BG}}': colorScheme.changeBadgeBg,
+      '{{STOCK_NAME}}': name,
+      '{{VIEW_LABEL}}': viewLabel,
+      '{{CURRENT_TIME}}': new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+      '{{CURRENT_PRICE}}': current.toFixed(2),
+      '{{CHANGE_VALUE}}': `${change >= 0 ? '+' : ''}${change.toFixed(2)}`,
+      '{{CHANGE_ICON}}': change >= 0 ? '↑' : '↓',
+      '{{CHANGE_PERCENT}}': Math.abs(changePercent).toFixed(2),
+      '{{HIGH_PRICE}}': high.toFixed(2),
+      '{{LOW_PRICE}}': low.toFixed(2),
+      '{{AMPLITUDE}}': ((high - low) / startPrice * 100).toFixed(2),
+      '{{START_PRICE}}': startPrice.toFixed(2),
+      '{{UPDATE_TIME}}': new Date().toLocaleString('zh-CN'),
+      '{{PRICES}}': JSON.stringify(data.map(d => d.price)),
+      '{{TIMES}}': JSON.stringify(data.map(d => d.time)),
+      '{{TIMESTAMPS}}': JSON.stringify(data.map(d => d.timestamp))
+    }
+    
+    // 批量替换所有变量
+    for (const [key, value] of Object.entries(replacements)) {
+      html = html.replace(new RegExp(key, 'g'), value)
+    }
 
     const page = await ctx.puppeteer.page()
     await page.setContent(html)
-    const element = await page.$('.card') // Capture only the card element
+    const element = await page.$('.card')
     const imgBuf = await element?.screenshot({ encoding: 'binary' })
     await page.close()
     
