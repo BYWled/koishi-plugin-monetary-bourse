@@ -42,10 +42,10 @@
     "email": "bywled@qq.com",
     "url": "https://github.com/BYWled"
   },
-  "homepage": "https://github.com/BYWled/monetary-bourse",
+  "homepage": "https://github.com/BYWled/koishi-plugin-monetary-bourse",
   "repository": {
     "type": "git",
-    "url": "https://github.com/BYWled/monetary-bourse"
+    "url": "https://github.com/BYWled/koishi-plugin-monetary-bourse"
   },
   "peerDependencies": {
     "koishi": "^4.17.0",
