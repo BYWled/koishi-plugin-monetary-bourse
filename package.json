@@ -1,12 +1,15 @@
 {
   "name": "koishi-plugin-monetary-bourse",
-  "version": "2.0.0-Alpha.9",
+  "version": "2.0.0-Alpha.10",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
   "files": [
     "lib",
     "dist"
   ],
+  "scripts": {
+    "build": "tsc && node -e \"require('fs').cpSync('src/templates', 'lib/templates', {recursive: true})\""
+  },
   "koishi": {
     "description": {
       "en": "`Provide exchange functionality for monetary money`",

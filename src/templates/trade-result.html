@@ -1,0 +1,513 @@
+<html>
+<head>
+  <style>
+    :root {
+      --bg-color: #0c0f15;
+      --card-bg: #151921;
+      --item-bg: #1e232e;
+      --text-primary: #e1e3e6;
+      --text-secondary: #8b919e;
+      --border-color: #232730;
+      
+      /* 语义色 */
+      --up-color: #f87171;   /* 涨/盈/买 */
+      --down-color: #4ade80; /* 跌/亏/卖 */
+      --up-bg: rgba(248, 113, 113, 0.15);
+      --down-bg: rgba(74, 222, 128, 0.15);
+      
+      --accent-color: #6366f1;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body { 
+      padding: 32px; 
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background-color: var(--bg-color);
+      width: 960px; 
+      height: 720px;
+      color: var(--text-primary);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .card { 
+      background-color: var(--card-bg); 
+      width: 100%;
+      height: 100%;
+      padding: 32px 40px; 
+      border-radius: 24px; 
+      box-shadow: 0 24px 48px rgba(0,0,0,0.5), inset 0 1px 1px rgba(255,255,255,0.05); 
+      border: 1px solid var(--border-color);
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+
+    /* Header */
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+      flex-shrink: 0;
+    }
+
+    .stock-info {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .stock-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      box-shadow: 0 8px 20px rgba(99, 102, 241, 0.3);
+      color: white;
+    }
+
+    .stock-text {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .stock-name {
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--text-primary);
+      line-height: 1.2;
+    }
+
+    .trade-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      width: fit-content;
+    }
+    .trade-badge.buy { background: var(--up-bg); color: var(--up-color); }
+    .trade-badge.sell { background: var(--down-bg); color: var(--down-color); }
+
+    .price-info {
+      text-align: right;
+    }
+
+    .trade-price {
+      font-family: 'Trebuchet MS', monospace;
+      font-size: 48px;
+      font-weight: 600;
+      line-height: 1;
+      letter-spacing: -1px;
+    }
+    .trade-price.buy { color: var(--up-color); }
+    .trade-price.sell { color: var(--down-color); }
+
+    .trade-detail {
+      margin-top: 8px;
+      font-size: 14px;
+      color: var(--text-secondary);
+      font-weight: 500;
+    }
+    .highlight-val { color: var(--text-primary); font-weight: 600; }
+
+    /* Chart Area */
+    .chart-container {
+      flex: 1;
+      width: 100%;
+      min-height: 0;
+      margin: 8px 0 24px 0;
+      border-radius: 16px;
+      background: rgba(0,0,0,0.2);
+      border: 1px solid var(--border-color);
+      position: relative;
+      overflow: hidden;
+    }
+    
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Footer Info Grid */
+    .footer {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+      flex-shrink: 0;
+    }
+
+    .stat-card {
+      background: var(--item-bg);
+      border-radius: 16px;
+      padding: 20px;
+      border: 1px solid var(--border-color);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    
+    .stat-card.primary {
+      background: rgba(99, 102, 241, 0.05);
+      border-color: rgba(99, 102, 241, 0.3);
+    }
+    
+    .stat-card.profit {
+      background: rgba(248, 113, 113, 0.05);
+      border-color: rgba(248, 113, 113, 0.3);
+    }
+    
+    .stat-card.loss {
+      background: rgba(74, 222, 128, 0.05);
+      border-color: rgba(74, 222, 128, 0.3);
+    }
+
+    .stat-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .stat-value {
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--text-primary);
+      font-family: 'Roboto Mono', monospace;
+    }
+    
+    .stat-value.profit { color: var(--up-color); }
+    .stat-value.loss { color: var(--down-color); }
+
+    .stat-sub {
+      font-size: 12px;
+      color: var(--text-secondary);
+      opacity: 0.8;
+    }
+
+    .update-time {
+      position: absolute;
+      bottom: 12px;
+      right: 20px;
+      font-size: 11px;
+      color: var(--text-secondary);
+      opacity: 0.4;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="header">
+      <div class="stock-info">
+        <div class="stock-icon">⚡</div>
+        <div class="stock-text">
+          <div class="stock-name" id="stock-name"></div>
+          <div class="trade-badge" id="trade-badge">
+            <span class="icon"></span>
+            <span class="text"></span>
+          </div>
+        </div>
+      </div>
+      <div class="price-info">
+        <div class="trade-price" id="trade-price"></div>
+        <div class="trade-detail">
+          成交 <span class="highlight-val" id="trade-amount"></span> 股 · 总额 <span class="highlight-val" id="trade-total"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="chart-container" id="chart-container">
+      <canvas id="chart"></canvas>
+    </div>
+
+    <div class="footer" id="footer"></div>
+    <div class="update-time" id="update-time"></div>
+  </div>
+
+  <script type="application/json" id="data-source">
+{{DATA}}
+  </script>
+  <script>
+    const DATA = JSON.parse(document.getElementById('data-source').textContent);
+    const isBuy = DATA.tradeType === 'buy';
+    
+    // 颜色定义
+    const colors = {
+      up: '#f87171',
+      down: '#4ade80',
+      text: '#e1e3e6',
+      grid: '#2a2e39',
+      label: '#64748b'
+    };
+    
+    // 主色调：买入用红，卖出用绿（或者根据盈亏）
+    // 这里统一：买入=红(Up/Action)，卖出=绿(Down/Action)
+    const mainColor = isBuy ? colors.up : colors.down;
+
+    // --- 渲染 DOM ---
+    document.getElementById('stock-name').textContent = DATA.stockName;
+    
+    const badge = document.getElementById('trade-badge');
+    badge.classList.add(DATA.tradeType);
+    badge.querySelector('.icon').textContent = isBuy ? '📈' : '📉';
+    badge.querySelector('.text').textContent = isBuy ? '买入成功 BUY' : '卖出成功 SELL';
+
+    const priceEl = document.getElementById('trade-price');
+    priceEl.textContent = DATA.tradePrice.toFixed(2);
+    priceEl.classList.add(DATA.tradeType);
+
+    document.getElementById('trade-amount').textContent = DATA.amount;
+    document.getElementById('trade-total').textContent = DATA.totalCost.toFixed(2);
+    document.getElementById('update-time').textContent = `交易时间 ${DATA.tradeTime}`;
+
+    const footer = document.getElementById('footer');
+    if (isBuy) {
+      footer.innerHTML = `
+        <div class="stat-card primary">
+          <div class="stat-label">持仓数量 Holdings</div>
+          <div class="stat-value">${DATA.newHolding}</div>
+          <div class="stat-sub">股</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">成交均价 Avg Price</div>
+          <div class="stat-value">${DATA.tradePrice.toFixed(2)}</div>
+          <div class="stat-sub">每股</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">当前市值 Market Value</div>
+          <div class="stat-value">${(DATA.newHolding * DATA.tradePrice).toFixed(2)}</div>
+          <div class="stat-sub">${DATA.currency}</div>
+        </div>
+      `;
+    } else {
+      const hasProfit = DATA.profit !== null;
+      const isProfit = hasProfit && DATA.profit >= 0;
+      const profitClass = hasProfit ? (isProfit ? 'profit' : 'loss') : '';
+      const profitSign = isProfit ? '+' : '';
+      const profitColorClass = isProfit ? 'profit' : 'loss';
+
+      footer.innerHTML = `
+        <div class="stat-card primary">
+          <div class="stat-label">卖出收益 Revenue</div>
+          <div class="stat-value">${DATA.totalCost.toFixed(2)}</div>
+          <div class="stat-sub">${DATA.currency}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">买入成本 Cost Basis</div>
+          <div class="stat-value">${hasProfit ? DATA.buyCost.toFixed(2) : '--'}</div>
+          <div class="stat-sub">${hasProfit ? '@ ' + DATA.avgBuyPrice.toFixed(2) : '无记录'}</div>
+        </div>
+        <div class="stat-card ${profitClass}">
+          <div class="stat-label">本次盈亏 P/L</div>
+          <div class="stat-value ${profitColorClass}">${hasProfit ? profitSign + DATA.profit.toFixed(2) : '--'}</div>
+          <div class="stat-sub">${hasProfit ? profitSign + DATA.profitPercent.toFixed(2) + '%' : ''}</div>
+        </div>
+      `;
+    }
+
+    // --- 绘制图表 ---
+    const container = document.getElementById('chart-container');
+    const canvas = document.getElementById('chart');
+    
+    // 动态设置 Canvas 分辨率以匹配容器大小 (x2 for Retina)
+    const rect = container.getBoundingClientRect();
+    const dpr = 2; // 强制高分屏渲染
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr); // 缩放上下文
+    
+    const W = rect.width;
+    const H = rect.height;
+    const padding = { top: 40, bottom: 40, left: 10, right: 80 }; // 右侧留给价格标签
+
+    const prices = DATA.prices;
+    const timestamps = DATA.timestamps;
+    const tradeIndex = DATA.tradeIndex;
+
+    // 计算范围
+    const maxPrice = Math.max(...prices);
+    const minPrice = Math.min(...prices);
+    const range = maxPrice - minPrice || 1;
+    // 留白
+    const yMin = minPrice - range * 0.2;
+    const yMax = maxPrice + range * 0.2;
+    const yRange = yMax - yMin;
+    
+    const tStart = timestamps[0];
+    const tEnd = timestamps[timestamps.length - 1];
+    const tRange = tEnd - tStart || 1;
+
+    const getX = t => padding.left + ((t - tStart) / tRange) * (W - padding.left - padding.right);
+    const getY = p => H - padding.bottom - ((p - yMin) / yRange) * (H - padding.top - padding.bottom);
+
+    // 1. 绘制网格
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+    ctx.lineWidth = 1;
+    
+    // 横线
+    const gridCount = 5;
+    for (let i = 0; i <= gridCount; i++) {
+      const y = H - padding.bottom - (i / gridCount) * (H - padding.top - padding.bottom);
+      ctx.beginPath();
+      ctx.moveTo(padding.left, y);
+      ctx.lineTo(W - padding.right, y);
+      ctx.stroke();
+      
+      // Y轴标签
+      const val = yMin + (i / gridCount) * yRange;
+      ctx.fillStyle = colors.label;
+      ctx.font = '500 11px "Roboto Mono", monospace';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(val.toFixed(2), W - padding.right + 10, y);
+    }
+
+    // 2. 路径点
+    const points = prices.map((p, i) => ({
+      x: getX(timestamps[i]),
+      y: getY(p)
+    }));
+
+    // 3. 渐变区域
+    const gradient = ctx.createLinearGradient(0, padding.top, 0, H - padding.bottom);
+    gradient.addColorStop(0, isBuy ? 'rgba(248, 113, 113, 0.2)' : 'rgba(74, 222, 128, 0.2)');
+    gradient.addColorStop(1, 'rgba(0,0,0,0)');
+
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, H - padding.bottom);
+    if (points.length > 1) {
+      ctx.lineTo(points[0].x, points[0].y);
+      for (let i = 0; i < points.length - 1; i++) {
+        const p0 = points[i];
+        const p1 = points[i + 1];
+        const midX = (p0.x + p1.x) / 2;
+        const midY = (p0.y + p1.y) / 2;
+        ctx.quadraticCurveTo(p0.x, p0.y, midX, midY);
+      }
+      ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
+    }
+    ctx.lineTo(points[points.length - 1].x, H - padding.bottom);
+    ctx.closePath();
+    ctx.fillStyle = gradient;
+    ctx.fill();
+
+    // 4. 曲线
+    ctx.beginPath();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = mainColor;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    if (points.length > 1) {
+      ctx.moveTo(points[0].x, points[0].y);
+      for (let i = 0; i < points.length - 1; i++) {
+        const p0 = points[i];
+        const p1 = points[i + 1];
+        const midX = (p0.x + p1.x) / 2;
+        const midY = (p0.y + p1.y) / 2;
+        ctx.quadraticCurveTo(p0.x, p0.y, midX, midY);
+      }
+      ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
+    }
+    ctx.stroke();
+
+    // 5. 交易点标记
+    const tradePoint = points[tradeIndex];
+    
+    // 垂直虚线
+    ctx.beginPath();
+    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+    ctx.lineWidth = 1;
+    ctx.moveTo(tradePoint.x, padding.top);
+    ctx.lineTo(tradePoint.x, H - padding.bottom);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // 扩散光圈
+    const glow = ctx.createRadialGradient(tradePoint.x, tradePoint.y, 0, tradePoint.x, tradePoint.y, 20);
+    glow.addColorStop(0, isBuy ? 'rgba(248, 113, 113, 0.6)' : 'rgba(74, 222, 128, 0.6)');
+    glow.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(tradePoint.x, tradePoint.y, 20, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 实心点
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(tradePoint.x, tradePoint.y, 5, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // 交易价格标签
+    const labelText = DATA.tradePrice.toFixed(2);
+    ctx.font = 'bold 14px "Roboto Mono", monospace';
+    const labelW = ctx.measureText(labelText).width + 16;
+    const labelH = 24;
+    const labelX = tradePoint.x - labelW / 2;
+    const labelY = tradePoint.y - 32;
+    
+    ctx.fillStyle = mainColor;
+    ctx.beginPath();
+    ctx.roundRect(labelX, labelY, labelW, labelH, 6);
+    ctx.fill();
+    
+    // 小三角
+    ctx.beginPath();
+    ctx.moveTo(tradePoint.x - 6, labelY + labelH);
+    ctx.lineTo(tradePoint.x + 6, labelY + labelH);
+    ctx.lineTo(tradePoint.x, labelY + labelH + 6);
+    ctx.fill();
+    
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(labelText, tradePoint.x, labelY + labelH/2 + 1);
+
+    // 6. 卖出时的买入成本线
+    if (!isBuy && DATA.avgBuyPrice) {
+      const buyY = getY(DATA.avgBuyPrice);
+      
+      ctx.beginPath();
+      ctx.setLineDash([6, 4]);
+      ctx.strokeStyle = 'rgba(99, 102, 241, 0.5)'; // Indigo
+      ctx.lineWidth = 1.5;
+      ctx.moveTo(padding.left, buyY);
+      ctx.lineTo(W - padding.right, buyY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      
+      // 标签
+      const buyLabel = "COST " + DATA.avgBuyPrice.toFixed(2);
+      ctx.font = 'bold 11px "Roboto Mono", monospace';
+      const bLabelW = ctx.measureText(buyLabel).width + 12;
+      
+      ctx.fillStyle = '#6366f1';
+      ctx.beginPath();
+      ctx.roundRect(W - padding.right + 8, buyY - 10, bLabelW, 20, 4);
+      ctx.fill();
+      
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(buyLabel, W - padding.right + 14, buyY);
+    }
+
+  </script>
+</body>
+</html>

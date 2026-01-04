@@ -1,0 +1,369 @@
+<html>
+<head>
+  <style>
+    :root {
+      --bg-color: #0c0f15;
+      --card-bg: #151921;
+      --item-bg: #1e232e;
+      --text-primary: #e1e3e6;
+      --text-secondary: #8b919e;
+      --border-color: #232730;
+      --accent-color: #6366f1;
+      --accent-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+      
+      /* 盈亏颜色 - 适配深色底 */
+      --profit-up: #f87171;
+      --profit-down: #4ade80;
+      --profit-up-bg: rgba(248, 113, 113, 0.15);
+      --profit-down-bg: rgba(74, 222, 128, 0.15);
+    }
+
+    body { 
+      margin: 0; 
+      padding: 24px; 
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+      background-color: var(--bg-color); 
+      width: 480px; 
+      box-sizing: border-box; 
+      color: var(--text-primary);
+    }
+
+    .card { 
+      background-color: var(--card-bg); 
+      padding: 32px; 
+      border-radius: 24px; 
+      box-shadow: 0 24px 48px rgba(0,0,0,0.5), inset 0 1px 1px rgba(255,255,255,0.05); 
+      border: 1px solid var(--border-color);
+    }
+
+    /* Header */
+    .header { 
+      display: flex; 
+      align-items: center; 
+      gap: 16px;
+      margin-bottom: 32px; 
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--border-color);
+    }
+    .avatar {
+      width: 56px;
+      height: 56px;
+      background: var(--accent-gradient);
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 24px;
+      font-weight: 700;
+      box-shadow: 0 8px 16px rgba(99, 102, 241, 0.3);
+    }
+    .user-info { flex: 1; }
+    .username { 
+      font-size: 20px; 
+      font-weight: 700; 
+      color: var(--text-primary); 
+      margin-bottom: 4px;
+    }
+    .account-label {
+      font-size: 13px;
+      color: var(--text-secondary);
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .account-label::before {
+      content: '';
+      display: block;
+      width: 6px;
+      height: 6px;
+      background-color: #22c55e;
+      border-radius: 50%;
+      box-shadow: 0 0 8px #22c55e;
+    }
+
+    /* Sections */
+    .section { margin-bottom: 28px; }
+    .section:last-child { margin-bottom: 0; }
+    
+    .section-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      margin-bottom: 16px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .section-title::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border-color);
+      opacity: 0.5;
+    }
+
+    /* Stock Card */
+    .stock-card {
+      background-color: var(--item-bg);
+      border-radius: 16px;
+      overflow: hidden;
+      border: 1px solid var(--border-color);
+    }
+    .stock-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 20px 24px;
+      background: rgba(255,255,255,0.02);
+      border-bottom: 1px solid var(--border-color);
+    }
+    .stock-name {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .stock-amount {
+      font-size: 13px;
+      font-weight: 600;
+      background: rgba(255,255,255,0.1);
+      color: var(--text-primary);
+      padding: 4px 10px;
+      border-radius: 6px;
+    }
+    
+    .stock-body { padding: 24px; }
+    
+    .stat-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+    .stat-item { display: flex; flex-direction: column; gap: 4px; }
+    .stat-label { font-size: 12px; color: var(--text-secondary); }
+    .stat-value { 
+      font-size: 18px; 
+      font-weight: 600; 
+      color: var(--text-primary); 
+      font-family: 'Roboto Mono', monospace;
+    }
+    .stat-value.highlight { color: var(--accent-color); }
+
+    /* Profit Section */
+    .profit-section {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 24px;
+      border-top: 1px solid var(--border-color);
+    }
+    .profit-label { font-size: 13px; font-weight: 600; color: var(--text-secondary); }
+    .profit-value { font-size: 18px; font-weight: 700; font-family: 'Roboto Mono', monospace; }
+    .profit-percent { font-size: 13px; font-weight: 600; margin-left: 8px; opacity: 0.9; }
+    .profit-hint { font-size: 12px; font-weight: 400; display: block; margin-top: 4px; opacity: 0.7; }
+    
+    /* Empty State */
+    .empty-state {
+      background: var(--item-bg);
+      border-radius: 16px;
+      padding: 40px 20px;
+      text-align: center;
+      border: 1px dashed var(--border-color);
+    }
+    .empty-icon { font-size: 32px; margin-bottom: 12px; opacity: 0.5; }
+    .empty-text { font-size: 14px; color: var(--text-secondary); }
+
+    /* Pending Items */
+    .pending-list { display: flex; flex-direction: column; gap: 12px; }
+    .pending-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--item-bg);
+      border-radius: 12px;
+      padding: 16px;
+      border: 1px solid var(--border-color);
+      position: relative;
+      overflow: hidden;
+    }
+    .pending-item::before {
+      content: '';
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: 4px;
+    }
+    .pending-item.buy::before { background-color: var(--profit-up); }
+    .pending-item.sell::before { background-color: var(--profit-down); }
+    
+    .pending-left { display: flex; align-items: center; gap: 12px; }
+    .pending-type {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 4px;
+      text-transform: uppercase;
+    }
+    .pending-type.buy { background: var(--profit-up-bg); color: var(--profit-up); }
+    .pending-type.sell { background: var(--profit-down-bg); color: var(--profit-down); }
+    
+    .pending-amount { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+    
+    .pending-center { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; margin-left: auto; margin-right: 16px; }
+    .pending-price { font-size: 12px; color: var(--text-secondary); }
+    .pending-cost { font-size: 11px; color: var(--text-secondary); opacity: 0.7; }
+    
+    .pending-right { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #eab308; font-weight: 600; }
+
+    /* Footer */
+    .footer {
+      margin-top: 32px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border-color);
+      text-align: center;
+      font-size: 11px;
+      color: var(--text-secondary);
+      opacity: 0.6;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="header">
+      <div class="avatar" id="avatar"></div>
+      <div class="user-info">
+        <div class="username" id="username"></div>
+        <div class="account-label">股票账户</div>
+      </div>
+    </div>
+    <div id="holding-container"></div>
+    <div id="pending-container"></div>
+    <div class="footer" id="footer"></div>
+  </div>
+
+  <script type="application/json" id="data-source">
+{{DATA}}
+  </script>
+  <script>
+    // 从 JSON 标签中读取数据
+    const DATA = JSON.parse(document.getElementById('data-source').textContent);
+
+    // 渲染用户信息
+    document.getElementById('avatar').textContent = DATA.username.charAt(0).toUpperCase();
+    document.getElementById('username').textContent = DATA.username;
+    document.getElementById('footer').textContent = `数据更新于 ${DATA.updateTime}`;
+
+    // 渲染持仓信息
+    const holdingContainer = document.getElementById('holding-container');
+    if (DATA.holding) {
+      const h = DATA.holding;
+      const hasCostData = h.totalCost !== null;
+      const isProfit = hasCostData ? h.profit >= 0 : true;
+      
+      // 适配深色模式的颜色
+      const profitColor = isProfit ? '#f87171' : '#4ade80';
+      const profitSign = isProfit ? '+' : '';
+      const profitBgColor = isProfit ? 'rgba(248, 113, 113, 0.1)' : 'rgba(74, 222, 128, 0.1)';
+
+      const profitSection = hasCostData ? `
+        <div class="profit-section" style="background: ${profitBgColor}">
+          <div class="profit-label">盈亏</div>
+          <div class="profit-value" style="color: ${profitColor}">
+            ${profitSign}${h.profit.toFixed(2)} ${DATA.currency}
+            <span class="profit-percent">(${profitSign}${h.profitPercent.toFixed(2)}%)</span>
+          </div>
+        </div>
+      ` : `
+        <div class="profit-section no-data" style="background: rgba(255, 255, 255, 0.03)">
+          <div class="profit-label">盈亏</div>
+          <div class="profit-value" style="color: #8b919e">
+            暂无成本记录
+            <span class="profit-hint">（新交易后将自动记录）</span>
+          </div>
+        </div>
+      `;
+
+      holdingContainer.innerHTML = `
+        <div class="section">
+          <div class="section-title">持仓详情 Holding</div>
+          <div class="stock-card">
+            <div class="stock-header">
+              <div class="stock-name">
+                <span>⚡</span>
+                ${h.stockName}
+              </div>
+              <div class="stock-amount">${h.amount} 股</div>
+            </div>
+            <div class="stock-body">
+              <div class="stat-grid">
+                <div class="stat-item">
+                  <div class="stat-label">现价 Current</div>
+                  <div class="stat-value">${h.currentPrice.toFixed(2)}</div>
+                </div>
+                <div class="stat-item">
+                  <div class="stat-label">成本价 Cost</div>
+                  <div class="stat-value">${hasCostData ? h.avgCost.toFixed(2) : '--'}</div>
+                </div>
+                <div class="stat-item">
+                  <div class="stat-label">持仓成本 Total Cost</div>
+                  <div class="stat-value">${hasCostData ? h.totalCost.toFixed(2) : '--'}</div>
+                </div>
+                <div class="stat-item">
+                  <div class="stat-label">市值 Market Value</div>
+                  <div class="stat-value highlight">${h.marketValue.toFixed(2)}</div>
+                </div>
+              </div>
+            </div>
+            ${profitSection}
+          </div>
+        </div>
+      `;
+    } else {
+      holdingContainer.innerHTML = `
+        <div class="section">
+          <div class="section-title">持仓详情 Holding</div>
+          <div class="empty-state">
+            <div class="empty-icon">📭</div>
+            <div class="empty-text">暂无持仓</div>
+          </div>
+        </div>
+      `;
+    }
+
+    // 渲染待处理交易
+    const pendingContainer = document.getElementById('pending-container');
+    if (DATA.pending && DATA.pending.length > 0) {
+      const pendingItems = DATA.pending.map(p => `
+        <div class="pending-item ${p.typeClass}">
+          <div class="pending-left">
+            <span class="pending-type ${p.typeClass}">${p.type}</span>
+            <span class="pending-amount">${p.amount} 股</span>
+          </div>
+          <div class="pending-center">
+            <span class="pending-price">@ ${p.price.toFixed(2)}</span>
+            <span class="pending-cost">总 ${p.cost.toFixed(2)}</span>
+          </div>
+          <div class="pending-right">
+            <span>⏱</span>
+            <span>${p.timeLeft}</span>
+          </div>
+        </div>
+      `).join('');
+
+      pendingContainer.innerHTML = `
+        <div class="section">
+          <div class="section-title">进行中的交易 Pending</div>
+          <div class="pending-list">
+            ${pendingItems}
+          </div>
+        </div>
+      `;
+    }
+  </script>
+</body>
+</html>

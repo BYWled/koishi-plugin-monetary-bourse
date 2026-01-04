@@ -1,4 +1,4 @@
-import { Context, Schema, h, Time, Logger } from 'koishi'
+﻿import { Context, Schema, h, Time, Logger } from 'koishi'
 import { resolve } from 'path'
 import { promises as fs } from 'fs'
 import {} from 'koishi-plugin-monetary'
@@ -191,11 +191,6 @@ export function apply(ctx: Context, config: Config) {
   let wasMarketOpen = false
   // 记录当日开盘价，用于日内涨跌幅限制
   let dailyOpenPrice: number | null = null
-  // 随机自动宏观调控参数（频率与幅度）
-  let macroWaveCount = 7
-  let macroWeeklyAmplitudeRatio = 0.08
-  // 随机自动宏观目标刷新时间
-  let nextMacroSwitchTime: Date | null = null
   // 内部测试用：虚拟时间（存在则以此为准，不使用系统时间）
   let __testNow: Date | null = null
 
@@ -205,13 +200,8 @@ export function apply(ctx: Context, config: Config) {
     
     // 检测开市事件：从关闭变为开启
     if (isOpen && !wasMarketOpen) {
-      // 开市了，切换K线模型
-      switchKLinePattern('自动开市')
-      // 记录当日开盘价（用于日内限制）
+      // 开市了，记录当日开盘价（用于日内限制）
       dailyOpenPrice = currentPrice
-      // 初始化随机宏观刷新时间（6-24小时）
-      const hours = 6 + Math.floor(Math.random() * 19)
-      nextMacroSwitchTime = new Date(Date.now() + hours * 3600 * 1000)
     }
     wasMarketOpen = isOpen
     
@@ -429,114 +419,356 @@ export function apply(ctx: Context, config: Config) {
 
   // --- 宏观调控逻辑 ---
 
-  // K线形态模型库（日内短线模型）
-  // 每个模型返回一个函数，根据日内进度(0-1)返回相对价格偏移系数(-1到1)
-  const kLinePatterns = {
-    // 1. 早盘冲高回落：开盘上涨，午后回落
-    morningRally: (p: number) => {
-      if (p < 0.3) return Math.sin(p / 0.3 * Math.PI / 2) * 1.0
-      return Math.cos((p - 0.3) / 0.7 * Math.PI / 2) * 0.6
+  // K线模型分类
+  type PatternCategory = 'bullish' | 'bearish' | 'neutral'
+
+  // K线模型定义接口
+  interface KLinePattern {
+    fn: (p: number) => number  // 价格偏移函数，p为进度(0-1)，返回偏移系数
+    category: PatternCategory   // 模型分类
+    name: string               // 中文名称
+    description: string        // 描述
+    endBias: number            // 结束时的偏置倾向（正=涨，负=跌）
+  }
+
+  // K线形态模型库（25种模型，分为看涨/看跌/中性三类）
+  const kLinePatterns: Record<string, KLinePattern> = {
+    // ==================== 看涨模型 (8种) ====================
+    bullish_steady: {
+      fn: (p: number) => Math.sin(p * Math.PI / 2) * 0.8 + Math.sin(p * Math.PI * 3) * 0.08,
+      category: 'bullish',
+      name: '单边上涨',
+      description: '持续稳健上涨',
+      endBias: 0.8
     },
-    // 2. 早盘低开高走：开盘下跌，之后持续上涨
-    vShape: (p: number) => {
-      if (p < 0.25) return -Math.sin(p / 0.25 * Math.PI / 2) * 0.8
-      return -0.8 + (p - 0.25) / 0.75 * 1.6
+    bullish_v_reversal: {
+      fn: (p: number) => {
+        if (p < 0.25) return -Math.sin(p / 0.25 * Math.PI / 2) * 0.6
+        return -0.6 + (p - 0.25) / 0.75 * 1.4
+      },
+      category: 'bullish',
+      name: 'V型反转',
+      description: '快速下跌后强势反弹',
+      endBias: 0.8
     },
-    // 3. 倒V型：持续上涨后快速下跌
-    invertedV: (p: number) => {
-      if (p < 0.6) return Math.sin(p / 0.6 * Math.PI / 2) * 1.0
-      return Math.cos((p - 0.6) / 0.4 * Math.PI / 2) * 1.0
+    bullish_stair: {
+      fn: (p: number) => {
+        const step = Math.floor(p * 4)
+        const inStep = (p * 4) % 1
+        const base = step * 0.22
+        const stepMove = inStep < 0.7 ? Math.sin(inStep / 0.7 * Math.PI / 2) * 0.25 : 0.25 - (inStep - 0.7) / 0.3 * 0.08
+        return base + stepMove
+      },
+      category: 'bullish',
+      name: '阶梯上涨',
+      description: '分阶段上涨，每段有小回调',
+      endBias: 0.72
     },
-    // 4. 震荡整理：小幅波动，无明显方向
-    consolidation: (p: number) => {
-      return Math.sin(p * Math.PI * 4) * 0.3 + Math.sin(p * Math.PI * 7) * 0.15
+    bullish_late_rally: {
+      fn: (p: number) => {
+        if (p < 0.7) return Math.sin(p / 0.7 * Math.PI * 2) * 0.15
+        return (p - 0.7) / 0.3 * 0.9
+      },
+      category: 'bullish',
+      name: '尾盘拉升',
+      description: '前期平稳，尾盘急拉',
+      endBias: 0.9
     },
-    // 5. 阶梯上涨：分段上涨，有回调
-    stairUp: (p: number) => {
-      const step = Math.floor(p * 4)
-      const inStep = (p * 4) % 1
-      const base = step * 0.25
-      const stepMove = inStep < 0.7 ? Math.sin(inStep / 0.7 * Math.PI / 2) * 0.3 : 0.3 - (inStep - 0.7) / 0.3 * 0.1
-      return base + stepMove
+    bullish_double_bottom: {
+      fn: (p: number) => {
+        if (p < 0.25) return -Math.sin(p / 0.25 * Math.PI / 2) * 0.5
+        if (p < 0.5) return -0.5 + Math.sin((p - 0.25) / 0.25 * Math.PI / 2) * 0.35
+        if (p < 0.75) return -0.15 - Math.sin((p - 0.5) / 0.25 * Math.PI / 2) * 0.35
+        return -0.5 + (p - 0.75) / 0.25 * 1.1
+      },
+      category: 'bullish',
+      name: 'W底突破',
+      description: '双底确认后持续上涨',
+      endBias: 0.6
     },
-    // 6. 阶梯下跌：分段下跌，有反弹
-    stairDown: (p: number) => {
-      const step = Math.floor(p * 4)
-      const inStep = (p * 4) % 1
-      const base = -step * 0.25
-      const stepMove = inStep < 0.7 ? -Math.sin(inStep / 0.7 * Math.PI / 2) * 0.3 : -0.3 + (inStep - 0.7) / 0.3 * 0.1
-      return base + stepMove
+    bullish_gap_up: {
+      fn: (p: number) => {
+        if (p < 0.1) return p / 0.1 * 0.4
+        return 0.4 + Math.sin((p - 0.1) / 0.9 * Math.PI / 2) * 0.4 + Math.sin(p * Math.PI * 4) * 0.05
+      },
+      category: 'bullish',
+      name: '跳空高开',
+      description: '跳空高开后震荡上行',
+      endBias: 0.8
     },
-    // 7. 尾盘拉升：前期平稳，尾盘快速上涨
-    lateRally: (p: number) => {
-      if (p < 0.7) return Math.sin(p / 0.7 * Math.PI * 2) * 0.2
-      return (p - 0.7) / 0.3 * 1.0
+    bullish_three_soldiers: {
+      fn: (p: number) => {
+        const phase = p * 3
+        const segment = Math.floor(phase)
+        const inSegment = phase % 1
+        if (segment === 0) return Math.sin(inSegment * Math.PI / 2) * 0.3
+        if (segment === 1) return 0.3 + Math.sin(inSegment * Math.PI / 2) * 0.28
+        return 0.58 + Math.sin(inSegment * Math.PI / 2) * 0.25
+      },
+      category: 'bullish',
+      name: '红三兵',
+      description: '连续三段上涨，渐次抬升',
+      endBias: 0.75
     },
-    // 8. 尾盘跳水：前期平稳或上涨，尾盘快速下跌
-    lateDive: (p: number) => {
-      if (p < 0.7) return Math.sin(p / 0.7 * Math.PI / 2) * 0.4
-      return 0.4 - (p - 0.7) / 0.3 * 1.2
+    bullish_morning_dip: {
+      fn: (p: number) => {
+        if (p < 0.2) return -Math.sin(p / 0.2 * Math.PI / 2) * 0.3
+        return -0.3 + (p - 0.2) / 0.8 * 1.1
+      },
+      category: 'bullish',
+      name: '早盘低开高走',
+      description: '早盘低开后持续上涨',
+      endBias: 0.8
     },
-    // 9. W底：双底形态
-    doubleBottom: (p: number) => {
-      if (p < 0.25) return -Math.sin(p / 0.25 * Math.PI / 2) * 0.8
-      if (p < 0.5) return -0.8 + Math.sin((p - 0.25) / 0.25 * Math.PI / 2) * 0.5
-      if (p < 0.75) return -0.3 - Math.sin((p - 0.5) / 0.25 * Math.PI / 2) * 0.5
-      return -0.8 + (p - 0.75) / 0.25 * 1.2
+
+    // ==================== 看跌模型 (8种) ====================
+    bearish_steady: {
+      fn: (p: number) => -Math.sin(p * Math.PI / 2) * 0.8 + Math.sin(p * Math.PI * 3) * 0.08,
+      category: 'bearish',
+      name: '单边下跌',
+      description: '持续稳健下跌',
+      endBias: -0.8
     },
-    // 10. M顶：双顶形态
-    doubleTop: (p: number) => {
-      if (p < 0.25) return Math.sin(p / 0.25 * Math.PI / 2) * 0.8
-      if (p < 0.5) return 0.8 - Math.sin((p - 0.25) / 0.25 * Math.PI / 2) * 0.5
-      if (p < 0.75) return 0.3 + Math.sin((p - 0.5) / 0.25 * Math.PI / 2) * 0.5
-      return 0.8 - (p - 0.75) / 0.25 * 1.2
+    bearish_inverted_v: {
+      fn: (p: number) => {
+        if (p < 0.35) return Math.sin(p / 0.35 * Math.PI / 2) * 0.5
+        return 0.5 - (p - 0.35) / 0.65 * 1.3
+      },
+      category: 'bearish',
+      name: '冲高回落',
+      description: '快速上涨后深度回落',
+      endBias: -0.8
     },
-    // 11. 单边上涨
-    bullish: (p: number) => {
-      return Math.sin(p * Math.PI / 2) * 0.8 + Math.sin(p * Math.PI * 3) * 0.1
+    bearish_stair: {
+      fn: (p: number) => {
+        const step = Math.floor(p * 4)
+        const inStep = (p * 4) % 1
+        const base = -step * 0.22
+        const stepMove = inStep < 0.7 ? -Math.sin(inStep / 0.7 * Math.PI / 2) * 0.25 : -0.25 + (inStep - 0.7) / 0.3 * 0.08
+        return base + stepMove
+      },
+      category: 'bearish',
+      name: '阶梯下跌',
+      description: '分阶段下跌，每段有小反弹',
+      endBias: -0.72
     },
-    // 12. 单边下跌
-    bearish: (p: number) => {
-      return -Math.sin(p * Math.PI / 2) * 0.8 + Math.sin(p * Math.PI * 3) * 0.1
+    bearish_late_dive: {
+      fn: (p: number) => {
+        if (p < 0.7) return Math.sin(p / 0.7 * Math.PI / 2) * 0.25
+        return 0.25 - (p - 0.7) / 0.3 * 1.15
+      },
+      category: 'bearish',
+      name: '尾盘跳水',
+      description: '前期平稳，尾盘急跌',
+      endBias: -0.9
+    },
+    bearish_double_top: {
+      fn: (p: number) => {
+        if (p < 0.25) return Math.sin(p / 0.25 * Math.PI / 2) * 0.5
+        if (p < 0.5) return 0.5 - Math.sin((p - 0.25) / 0.25 * Math.PI / 2) * 0.35
+        if (p < 0.75) return 0.15 + Math.sin((p - 0.5) / 0.25 * Math.PI / 2) * 0.35
+        return 0.5 - (p - 0.75) / 0.25 * 1.1
+      },
+      category: 'bearish',
+      name: 'M顶回落',
+      description: '双顶确认后持续下跌',
+      endBias: -0.6
+    },
+    bearish_gap_down: {
+      fn: (p: number) => {
+        if (p < 0.1) return -p / 0.1 * 0.4
+        return -0.4 - Math.sin((p - 0.1) / 0.9 * Math.PI / 2) * 0.4 + Math.sin(p * Math.PI * 4) * 0.05
+      },
+      category: 'bearish',
+      name: '跳空低开',
+      description: '跳空低开后震荡下行',
+      endBias: -0.8
+    },
+    bearish_three_crows: {
+      fn: (p: number) => {
+        const phase = p * 3
+        const segment = Math.floor(phase)
+        const inSegment = phase % 1
+        if (segment === 0) return -Math.sin(inSegment * Math.PI / 2) * 0.3
+        if (segment === 1) return -0.3 - Math.sin(inSegment * Math.PI / 2) * 0.28
+        return -0.58 - Math.sin(inSegment * Math.PI / 2) * 0.25
+      },
+      category: 'bearish',
+      name: '黑三鸦',
+      description: '连续三段下跌，渐次走低',
+      endBias: -0.75
+    },
+    bearish_morning_bounce: {
+      fn: (p: number) => {
+        if (p < 0.2) return Math.sin(p / 0.2 * Math.PI / 2) * 0.3
+        return 0.3 - (p - 0.2) / 0.8 * 1.1
+      },
+      category: 'bearish',
+      name: '早盘高开低走',
+      description: '早盘高开后持续下跌',
+      endBias: -0.8
+    },
+
+    // ==================== 中性模型 (9种) ====================
+    neutral_consolidation: {
+      fn: (p: number) => Math.sin(p * Math.PI * 4) * 0.25 + Math.sin(p * Math.PI * 7) * 0.1,
+      category: 'neutral',
+      name: '横盘整理',
+      description: '窄幅震荡，无明显方向',
+      endBias: 0
+    },
+    neutral_wide_range: {
+      fn: (p: number) => Math.sin(p * Math.PI * 2) * 0.5 + Math.sin(p * Math.PI * 5) * 0.15,
+      category: 'neutral',
+      name: '宽幅震荡',
+      description: '大幅波动但最终回归起点',
+      endBias: 0
+    },
+    neutral_converging: {
+      fn: (p: number) => Math.sin(p * Math.PI * 6) * 0.4 * (1 - p),
+      category: 'neutral',
+      name: '收敛三角',
+      description: '波动逐渐收窄',
+      endBias: 0
+    },
+    neutral_diverging: {
+      fn: (p: number) => Math.sin(p * Math.PI * 6) * 0.15 * (1 + p * 2),
+      category: 'neutral',
+      name: '发散三角',
+      description: '波动逐渐放大',
+      endBias: 0
+    },
+    neutral_box: {
+      fn: (p: number) => {
+        const cycles = 3
+        const phase = (p * cycles) % 1
+        if (phase < 0.25) return phase / 0.25 * 0.35
+        if (phase < 0.75) return 0.35 - (phase - 0.25) / 0.5 * 0.7
+        return -0.35 + (phase - 0.75) / 0.25 * 0.35
+      },
+      category: 'neutral',
+      name: '箱体震荡',
+      description: '在固定区间内来回波动',
+      endBias: 0
+    },
+    neutral_up_down: {
+      fn: (p: number) => {
+        if (p < 0.5) return Math.sin(p / 0.5 * Math.PI / 2) * 0.5
+        return 0.5 - (p - 0.5) / 0.5 * 0.5
+      },
+      category: 'neutral',
+      name: '先涨后跌',
+      description: '上涨后回落至起点',
+      endBias: 0
+    },
+    neutral_down_up: {
+      fn: (p: number) => {
+        if (p < 0.5) return -Math.sin(p / 0.5 * Math.PI / 2) * 0.5
+        return -0.5 + (p - 0.5) / 0.5 * 0.5
+      },
+      category: 'neutral',
+      name: '先跌后涨',
+      description: '下跌后反弹至起点',
+      endBias: 0
+    },
+    neutral_slight_up: {
+      fn: (p: number) => p * 0.15 + Math.sin(p * Math.PI * 5) * 0.12,
+      category: 'neutral',
+      name: '微涨震荡',
+      description: '小幅上涨伴随震荡',
+      endBias: 0.15
+    },
+    neutral_slight_down: {
+      fn: (p: number) => -p * 0.15 + Math.sin(p * Math.PI * 5) * 0.12,
+      category: 'neutral',
+      name: '微跌震荡',
+      description: '小幅下跌伴随震荡',
+      endBias: -0.15
     }
   }
 
-  const patternNames = Object.keys(kLinePatterns) as (keyof typeof kLinePatterns)[]
-  
-  // K线模型中文名映射
-  const patternChineseNames: Record<keyof typeof kLinePatterns, string> = {
-    morningRally: '早盘冲高回落',
-    vShape: 'V型反转',
-    invertedV: '倒V型',
-    consolidation: '震荡整理',
-    stairUp: '阶梯上涨',
-    stairDown: '阶梯下跌',
-    lateRally: '尾盘拉升',
-    lateDive: '尾盘跳水',
-    doubleBottom: 'W底(双底)',
-    doubleTop: 'M顶(双顶)',
-    bullish: '单边上涨',
-    bearish: '单边下跌'
+  // 按分类索引模型
+  const patternsByCategory: Record<PatternCategory, string[]> = {
+    bullish: [],
+    bearish: [],
+    neutral: []
+  }
+  for (const [name, pattern] of Object.entries(kLinePatterns)) {
+    patternsByCategory[pattern.category].push(name)
   }
 
-  // 当前使用的K线模型（开市时自动切换）
-  let currentDayPattern: keyof typeof kLinePatterns = patternNames[Math.floor(Math.random() * patternNames.length)]
+  const patternNames = Object.keys(kLinePatterns)
+
+  // 当前使用的K线模型
+  let currentPattern: string = patternNames[Math.floor(Math.random() * patternNames.length)]
+  // K线模型切换时的起始价格（用于计算模型内的价格变化）
+  let patternStartPrice: number = currentPrice
   // 记录上次切换时间和下次计划切换时间（用于随机时间切换）
   let lastPatternSwitchTime = new Date()
   // 初始化下次切换时间：当前时间 + 随机时长 (1-6小时)
   let nextPatternSwitchTime = new Date(Date.now() + (1 + Math.random() * 5) * 3600 * 1000)
 
+  /**
+   * 根据期望价格智能选择K线模型
+   */
+  function selectPatternByExpectation(expectedPrice: number, curPrice: number, cycleProgress: number): string {
+    const deviation = (expectedPrice - curPrice) / curPrice
+    let bullishProb = 0.33, bearishProb = 0.33, neutralProb = 0.34
+    const deviationThreshold = 0.05
+
+    if (Math.abs(deviation) > deviationThreshold) {
+      const adjustmentStrength = Math.min(Math.abs(deviation) / 0.3, 1)
+      const maxBias = 0.45
+      if (deviation > 0) {
+        bullishProb = 0.33 + adjustmentStrength * maxBias
+        bearishProb = 0.33 - adjustmentStrength * maxBias * 0.7
+        neutralProb = 1 - bullishProb - bearishProb
+      } else {
+        bearishProb = 0.33 + adjustmentStrength * maxBias
+        bullishProb = 0.33 - adjustmentStrength * maxBias * 0.7
+        neutralProb = 1 - bullishProb - bearishProb
+      }
+    } else {
+      neutralProb = 0.50; bullishProb = 0.25; bearishProb = 0.25
+    }
+
+    if (cycleProgress > 0.8) {
+      const endBoost = (cycleProgress - 0.8) / 0.2 * 0.2
+      if (deviation > 0) bullishProb += endBoost
+      else if (deviation < 0) bearishProb += endBoost
+      const total = bullishProb + bearishProb + neutralProb
+      bullishProb /= total; bearishProb /= total; neutralProb /= total
+    }
+
+    const rand = Math.random()
+    let category: PatternCategory
+    if (rand < bullishProb) category = 'bullish'
+    else if (rand < bullishProb + bearishProb) category = 'bearish'
+    else category = 'neutral'
+
+    const patterns = patternsByCategory[category]
+    const selected = patterns[Math.floor(Math.random() * patterns.length)]
+    logger.info(`selectPatternByExpectation: deviation=${(deviation * 100).toFixed(2)}%, selected=${category}/${selected}`)
+    return selected
+  }
+
   // 切换K线模型的函数
-  function switchKLinePattern(reason: string) {
-    const oldPattern = currentDayPattern
-    currentDayPattern = patternNames[Math.floor(Math.random() * patternNames.length)]
+  function switchKLinePattern(reason: string, expectedPrice?: number, cycleProgress?: number) {
+    const oldPattern = currentPattern
+    if (expectedPrice !== undefined && cycleProgress !== undefined) {
+      currentPattern = selectPatternByExpectation(expectedPrice, currentPrice, cycleProgress)
+    } else {
+      currentPattern = patternNames[Math.floor(Math.random() * patternNames.length)]
+    }
+    patternStartPrice = currentPrice
     const now = new Date()
     lastPatternSwitchTime = now
-    // 重置下次切换时间（1-6小时后）
     const minDuration = 1 * 3600 * 1000
     const randomDuration = Math.random() * 5 * 3600 * 1000
     nextPatternSwitchTime = new Date(now.getTime() + minDuration + randomDuration)
-    logger.info(`${reason}切换K线模型: ${patternChineseNames[oldPattern]}(${oldPattern}) -> ${patternChineseNames[currentDayPattern]}(${currentDayPattern}), 下次随机切换: ${nextPatternSwitchTime.toLocaleString()}`)
+    const oldInfo = kLinePatterns[oldPattern]
+    const newInfo = kLinePatterns[currentPattern]
+    logger.info(`${reason}切换K线模型: ${oldInfo?.name || oldPattern} -> ${newInfo.name}(${currentPattern}), 下次随机切换: ${nextPatternSwitchTime.toLocaleString()}`)
   }
 
   async function updatePrice() {
@@ -592,31 +824,64 @@ export function apply(ctx: Context, config: Config) {
 
     if (needNewState) {
       await createAutoState()
-    } else if (state.mode === 'auto' && nextMacroSwitchTime && now >= nextMacroSwitchTime) {
-      const hours = 6 + Math.floor(Math.random() * 19)
-      nextMacroSwitchTime = new Date(now.getTime() + hours * 3600 * 1000)
-      await createAutoState()
     }
 
-    // K线模型切换
-    const timeSinceLastSwitch = now.getTime() - lastPatternSwitchTime.getTime()
-    const forceSwitchDuration = 30 * 3600 * 1000
-    if (now >= nextPatternSwitchTime || timeSinceLastSwitch > forceSwitchDuration) {
-      switchKLinePattern('随机时间')
-    }
-
-    // ============================================================
-    // 真实股票走势模拟（几何布朗运动 + 均值回归 + 日内形态）
-    // ============================================================
-    
     // --- 基础参数 ---
     const basePrice = state.startPrice
     const targetPrice = state.targetPrice
     const totalDuration = state.endTime.getTime() - state.lastCycleStart.getTime()
     const elapsed = now.getTime() - state.lastCycleStart.getTime()
     const cycleProgress = Math.max(0, Math.min(1, elapsed / totalDuration))
+
+    // ============================================================
+    // K线模型切换逻辑（基于期望价格智能选择）
+    // ============================================================
+    const timeSinceLastSwitch = now.getTime() - lastPatternSwitchTime.getTime()
+    const forceSwitchDuration = 30 * 3600 * 1000
+    if (now >= nextPatternSwitchTime || timeSinceLastSwitch > forceSwitchDuration) {
+      switchKLinePattern('随机时间', targetPrice, cycleProgress)
+    }
+
+    // ============================================================
+    // 计算当前K线模型内的进度
+    // ============================================================
+    const patternDuration = nextPatternSwitchTime.getTime() - lastPatternSwitchTime.getTime()
+    const patternElapsed = now.getTime() - lastPatternSwitchTime.getTime()
+    const patternProgress = Math.max(0, Math.min(1, patternElapsed / patternDuration))
+
+    // ============================================================
+    // 1. K线模型驱动价格变化（主要动力）
+    // ============================================================
+    const pattern = kLinePatterns[currentPattern]
+    if (!pattern) {
+      logger.warn(`updatePrice: 未知的K线模型 ${currentPattern}`)
+      return
+    }
     
-    // --- 日内时间进度 ---
+    const patternValue = pattern.fn(patternProgress)
+    const prevPatternValue = pattern.fn(Math.max(0, patternProgress - 0.02))
+    const patternDelta = (patternValue - prevPatternValue)
+    
+    const deviation = (targetPrice - currentPrice) / currentPrice
+    const deviationMultiplier = 1 + Math.abs(deviation) * 2
+    const patternReturn = patternDelta * 0.15 * deviationMultiplier
+
+    // ============================================================
+    // 2. 期望回归项（向目标价格靠拢）
+    // ============================================================
+    const trackPrice = basePrice + (targetPrice - basePrice) * cycleProgress
+    const trackDeviation = (trackPrice - currentPrice) / currentPrice
+    const endPhaseBoost = cycleProgress > 0.8 ? (cycleProgress - 0.8) / 0.2 * 0.05 : 0
+    const reversionStrength = 0.02 + endPhaseBoost
+    const reversionReturn = trackDeviation * reversionStrength
+
+    // ============================================================
+    // 3. 随机波动项（增加真实感）
+    // ============================================================
+    const u1 = Math.random()
+    const u2 = Math.random()
+    const normalRandom = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2)
+    
     const dayStart = new Date(now)
     dayStart.setHours(config.openHour, 0, 0, 0)
     const dayEnd = new Date(now)
@@ -624,82 +889,31 @@ export function apply(ctx: Context, config: Config) {
     const dayDuration = dayEnd.getTime() - dayStart.getTime()
     const dayElapsed = now.getTime() - dayStart.getTime()
     const dayProgress = Math.max(0, Math.min(1, dayElapsed / dayDuration))
+    
+    const morningVol = Math.exp(-8 * dayProgress)
+    const afternoonVol = Math.exp(-8 * (1 - dayProgress))
+    const volatility = 0.3 + morningVol * 0.5 + afternoonVol * 0.4
+    const randomReturn = normalRandom * 0.002 * volatility
 
     // ============================================================
-    // 1. 宏观漂移项（Drift）- 向目标价格的均值回归（融入周波浪）
+    // 4. 合成总收益率
     // ============================================================
-    // 当前应有价格 = 基准价 → 目标价的线性插值，并叠加周波浪偏置（对目标的轻微偏移）
-    const expectedBase = basePrice + (targetPrice - basePrice) * cycleProgress
-    // 周期波浪以偏置形式作用于“应有价格”，而非直接作为收益项
-    const wavePhaseForMean = 2 * Math.PI * macroWaveCount * cycleProgress
-    const weeklyAmplitudeRatioForMean = Math.min(Math.max(macroWeeklyAmplitudeRatio, 0.04), 0.12) // 收敛至4%-12%（增强波浪感）
-    const waveMeanBias = Math.sin(wavePhaseForMean) * weeklyAmplitudeRatioForMean
-    const expectedPrice = expectedBase * (1 + waveMeanBias)
-    
-    // 回归力度：价格偏离越大，回归力越强
-    const deviation = (expectedPrice - currentPrice) / currentPrice
-    const meanReversionStrength = 0.05 // 增强回归强度（每tick回归5%的偏差）
-    const driftReturn = deviation * meanReversionStrength
+    const totalReturn = patternReturn + reversionReturn + randomReturn
 
     // ============================================================
-    // 2. 波动率项（Volatility）- 基于日内时段变化
+    // 5. 计算新价格并应用限幅
     // ============================================================
-    // 真实股票的波动率在一天中不同时段是不同的
-    // 开盘和收盘波动大，午盘相对平静
-    const getVolatility = (progress: number): number => {
-      // U型波动率曲线：开盘高、午盘低、尾盘高
-      const morningVol = Math.exp(-8 * progress) // 开盘后快速下降
-      const afternoonVol = Math.exp(-8 * (1 - progress)) // 收盘前快速上升
-      const baseVol = 0.3 // 基础波动率
-      return baseVol + morningVol * 0.5 + afternoonVol * 0.4
-    }
-    
-    const volatility = getVolatility(dayProgress)
-    
-    // ============================================================
-    // 3. 随机项（Random Walk）- 几何布朗运动
-    // ============================================================
-    // 使用Box-Muller变换生成标准正态分布随机数
-    const u1 = Math.random()
-    const u2 = Math.random()
-    const normalRandom = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2)
-    
-    // 基础波动幅度（每2分钟约0.25%的标准差，增强波动感）
-    const baseVolatilityPerTick = 0.0025
-    const randomReturn = normalRandom * baseVolatilityPerTick * volatility
-
-    // ============================================================
-    // 4. K线形态项 - 叠加日内趋势偏好
-    // ============================================================
-    // K线形态提供一个微小的方向性偏置，而非直接决定价格
-    const patternFn = kLinePatterns[currentDayPattern]
-    const patternValue = patternFn(dayProgress)
-    const prevPatternValue = patternFn(Math.max(0, dayProgress - 0.01))
-    const patternTrend = (patternValue - prevPatternValue) * 0.8 // 形态变化的方向（增强）
-    const patternBias = patternTrend * 0.008 // 转化为更显著的收益率偏置
-
-    // ============================================================
-    // 5/6. 合成收益率并计算新价格（移除波浪收益项，波浪已作用于均值目标）
-    // ============================================================
-    // 总收益率 = 漂移 + 随机 + 形态偏置
-    const totalReturn = driftReturn + randomReturn + patternBias
-    
-    // 使用几何收益率计算新价格（保证价格始终为正）
     let newPrice = currentPrice * (1 + totalReturn)
     
-    // ============================================================
-    // 7. 涨跌幅限制（相对于周期起始价和日开盘价）
-    // ============================================================
     const dayBase = dailyOpenPrice ?? basePrice
     const weekUpper = basePrice * 1.5
     const weekLower = basePrice * 0.5
-    const dayUpper = dayBase * 1.5
-    const dayLower = dayBase * 0.5
+    const dayUpper = dayBase * 1.3
+    const dayLower = dayBase * 0.7
     
     const upperLimit = Math.min(weekUpper, dayUpper)
     const lowerLimit = Math.max(weekLower, dayLower)
     
-    // 软着陆：接近限幅时逐渐减缓而非硬切
     if (newPrice > upperLimit * 0.95) {
       const overshoot = (newPrice - upperLimit * 0.95) / (upperLimit * 0.05)
       newPrice = upperLimit * 0.95 + (upperLimit * 0.05) * Math.tanh(overshoot)
@@ -710,11 +924,8 @@ export function apply(ctx: Context, config: Config) {
     }
     
     newPrice = Math.max(lowerLimit, Math.min(upperLimit, newPrice))
-    
-    // 最低价格保护
     if (newPrice < 1) newPrice = 1
     
-    // 保留两位小数
     newPrice = Number(newPrice.toFixed(2))
     currentPrice = newPrice
     await ctx.database.create('bourse_history', { stockId, price: newPrice, time: new Date() })
@@ -897,7 +1108,35 @@ export function apply(ctx: Context, config: Config) {
       // 如果冻结时间为0，立即处理挂单（不等待定时任务）
       if (freezeMinutes === 0) {
         await processPendingTransactions()
-        return `交易已完成！\n花费: ${cost.toFixed(2)} ${config.currency}\n股票已到账。`
+        
+        // 获取价格历史数据用于图表
+        const historyData = await ctx.database.get('bourse_history', 
+          { stockId }, 
+          { sort: { time: 'asc' }, limit: 100 }
+        )
+        const priceHistory = historyData.map(h => ({
+          time: new Date(h.time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+          price: h.price,
+          timestamp: new Date(h.time).getTime()
+        }))
+        
+        // 获取买入后的持仓数量
+        const newHoldingData = await ctx.database.get('bourse_holding', { userId: visibleUserId, stockId })
+        const newHoldingAmount = newHoldingData.length > 0 ? newHoldingData[0].amount : amount
+        
+        // 渲染交易结果图片
+        return await renderTradeResultImage(
+          ctx,
+          'buy',
+          config.stockName,
+          amount,
+          currentPrice,
+          cost,
+          config.currency,
+          priceHistory,
+          undefined, // 买入无需卖出信息
+          newHoldingAmount
+        )
       }
 
       return `交易申请已提交！\n花费: ${cost.toFixed(2)} ${config.currency}\n冻结时间: ${freezeMinutes.toFixed(1)}分钟\n股票将在解冻后到账。`
@@ -985,7 +1224,40 @@ export function apply(ctx: Context, config: Config) {
       // 如果冻结时间为0，立即处理挂单（不等待定时任务）
       if (freezeMinutes === 0) {
         await processPendingTransactions()
-        return `卖出已完成！\n收益: ${gain.toFixed(2)} ${config.currency}\n资金已到账。`
+        
+        // 获取价格历史数据用于图表
+        const historyData = await ctx.database.get('bourse_history', 
+          { stockId }, 
+          { sort: { time: 'asc' }, limit: 100 }
+        )
+        const priceHistory = historyData.map(h => ({
+          time: new Date(h.time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+          price: h.price,
+          timestamp: new Date(h.time).getTime()
+        }))
+        
+        // 计算盈亏信息（使用之前计算的 avgCostPerShare 和 soldCost）
+        const hasCostRecord = existingTotalCost > 0
+        const profit = hasCostRecord ? Number((gain - soldCost).toFixed(2)) : null
+        const profitPercent = hasCostRecord && soldCost > 0 ? Number(((profit / soldCost) * 100).toFixed(2)) : null
+        
+        // 渲染交易结果图片
+        return await renderTradeResultImage(
+          ctx,
+          'sell',
+          config.stockName,
+          amount,
+          currentPrice,
+          gain,
+          config.currency,
+          priceHistory,
+          {
+            avgBuyPrice: hasCostRecord ? avgCostPerShare : null,
+            buyCost: hasCostRecord ? soldCost : null,
+            profit,
+            profitPercent
+          }
+        )
       }
 
       return `卖出挂单已提交！\n预计收益: ${gain.toFixed(2)} ${config.currency}\n资金冻结: ${freezeMinutes.toFixed(1)}分钟\n资金将在解冻后到账。`
@@ -1235,352 +1507,90 @@ export function apply(ctx: Context, config: Config) {
     }[],
     currency: string
   ) {
-    // 判断是否有成本数据
-    const hasCostData = holding && holding.totalCost !== null
-    const isProfit = hasCostData ? holding.profit >= 0 : true
-    const profitColor = isProfit ? '#d93025' : '#188038'
-    const profitSign = isProfit ? '+' : ''
+    // 读取模板文件
+    const fs = require('fs')
+    const path = require('path')
+    const templatePath = path.join(__dirname, 'templates', 'holding-card.html')
+    let template = fs.readFileSync(templatePath, 'utf-8')
 
-    // 根据是否有成本数据渲染不同的盈亏区域
-    const profitSectionHtml = hasCostData ? `
-          <div class="profit-section" style="background: ${isProfit ? 'rgba(217, 48, 37, 0.08)' : 'rgba(24, 128, 56, 0.08)'}">
-            <div class="profit-label">盈亏</div>
-            <div class="profit-value" style="color: ${profitColor}">
-              ${profitSign}${holding.profit.toFixed(2)} ${currency}
-              <span class="profit-percent">(${profitSign}${holding.profitPercent.toFixed(2)}%)</span>
-            </div>
-          </div>
-    ` : `
-          <div class="profit-section no-data" style="background: rgba(128, 128, 128, 0.08)">
-            <div class="profit-label">盈亏</div>
-            <div class="profit-value" style="color: #888">
-              暂无成本记录
-              <span class="profit-hint">（新交易后将自动记录）</span>
-            </div>
-          </div>
-    `
+    // 准备数据对象
+    const data = {
+      username,
+      holding,
+      pending,
+      currency,
+      updateTime: new Date().toLocaleString('zh-CN')
+    }
 
-    const holdingHtml = holding ? `
-      <div class="section">
-        <div class="section-title">📈 持仓详情</div>
-        <div class="stock-card">
-          <div class="stock-header">
-            <div class="stock-name">${holding.stockName}</div>
-            <div class="stock-amount">${holding.amount} 股</div>
-          </div>
-          <div class="stock-body">
-            <div class="stat-row">
-              <div class="stat-item">
-                <div class="stat-label">现价</div>
-                <div class="stat-value">${holding.currentPrice.toFixed(2)}</div>
-              </div>
-              <div class="stat-item">
-                <div class="stat-label">成本价</div>
-                <div class="stat-value">${hasCostData ? holding.avgCost.toFixed(2) : '--'}</div>
-              </div>
-            </div>
-            <div class="stat-row">
-              <div class="stat-item">
-                <div class="stat-label">持仓成本</div>
-                <div class="stat-value">${hasCostData ? holding.totalCost.toFixed(2) : '--'}</div>
-              </div>
-              <div class="stat-item">
-                <div class="stat-label">市值</div>
-                <div class="stat-value highlight">${holding.marketValue.toFixed(2)}</div>
-              </div>
-            </div>
-          </div>
-          ${profitSectionHtml}
-        </div>
-      </div>
-    ` : `
-      <div class="section">
-        <div class="section-title">📈 持仓详情</div>
-        <div class="empty-state">
-          <div class="empty-icon">📭</div>
-          <div class="empty-text">暂无持仓</div>
-        </div>
-      </div>
-    `
-
-    const pendingHtml = pending.length > 0 ? `
-      <div class="section">
-        <div class="section-title">⏳ 进行中的交易</div>
-        ${pending.map(p => `
-          <div class="pending-item ${p.typeClass}">
-            <div class="pending-left">
-              <span class="pending-type ${p.typeClass}">${p.type}</span>
-              <span class="pending-amount">${p.amount} 股</span>
-            </div>
-            <div class="pending-center">
-              <span class="pending-price">单价 ${p.price.toFixed(2)}</span>
-              <span class="pending-cost">总额 ${p.cost.toFixed(2)}</span>
-            </div>
-            <div class="pending-right">
-              <span class="pending-time">⏱ ${p.timeLeft}</span>
-            </div>
-          </div>
-        `).join('')}
-      </div>
-    ` : ''
-
-    const html = `
-    <html>
-    <head>
-      <style>
-        body { 
-          margin: 0; 
-          padding: 20px; 
-          font-family: 'Segoe UI', 'Microsoft YaHei', Roboto, sans-serif; 
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-          width: 450px; 
-          box-sizing: border-box; 
-        }
-        .card { 
-          background: white; 
-          padding: 25px; 
-          border-radius: 20px; 
-          box-shadow: 0 20px 40px rgba(0,0,0,0.15); 
-        }
-        .header { 
-          display: flex; 
-          align-items: center; 
-          gap: 12px;
-          margin-bottom: 20px; 
-          padding-bottom: 15px;
-          border-bottom: 2px solid #f0f2f5;
-        }
-        .avatar {
-          width: 48px;
-          height: 48px;
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: white;
-          font-size: 20px;
-          font-weight: bold;
-        }
-        .user-info {
-          flex: 1;
-        }
-        .username { 
-          font-size: 22px; 
-          font-weight: 700; 
-          color: #1a1a1a; 
-        }
-        .account-label {
-          font-size: 13px;
-          color: #888;
-          margin-top: 2px;
-        }
-        .section {
-          margin-bottom: 20px;
-        }
-        .section:last-child {
-          margin-bottom: 0;
-        }
-        .section-title {
-          font-size: 14px;
-          font-weight: 600;
-          color: #666;
-          margin-bottom: 12px;
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-        }
-        .stock-card {
-          background: #f8f9fc;
-          border-radius: 16px;
-          overflow: hidden;
-        }
-        .stock-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 16px 20px;
-          background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
-          color: white;
-        }
-        .stock-name {
-          font-size: 18px;
-          font-weight: 700;
-        }
-        .stock-amount {
-          font-size: 16px;
-          font-weight: 600;
-          background: rgba(255,255,255,0.2);
-          padding: 4px 12px;
-          border-radius: 20px;
-        }
-        .stock-body {
-          padding: 16px 20px;
-        }
-        .stat-row {
-          display: flex;
-          justify-content: space-between;
-          margin-bottom: 12px;
-        }
-        .stat-row:last-child {
-          margin-bottom: 0;
-        }
-        .stat-item {
-          text-align: center;
-          flex: 1;
-        }
-        .stat-label {
-          font-size: 12px;
-          color: #888;
-          margin-bottom: 4px;
-        }
-        .stat-value {
-          font-size: 18px;
-          font-weight: 700;
-          color: #333;
-        }
-        .stat-value.highlight {
-          color: #667eea;
-        }
-        .profit-section {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 16px 20px;
-          border-top: 1px solid #eee;
-        }
-        .profit-label {
-          font-size: 14px;
-          font-weight: 600;
-          color: #666;
-        }
-        .profit-value {
-          font-size: 22px;
-          font-weight: 800;
-        }
-        .profit-percent {
-          font-size: 14px;
-          font-weight: 600;
-          margin-left: 6px;
-        }
-        .profit-hint {
-          font-size: 12px;
-          font-weight: 400;
-          display: block;
-          margin-top: 4px;
-        }
-        .profit-section.no-data .profit-value {
-          font-size: 16px;
-          font-weight: 600;
-        }
-        .empty-state {
-          background: #f8f9fc;
-          border-radius: 16px;
-          padding: 40px 20px;
-          text-align: center;
-        }
-        .empty-icon {
-          font-size: 48px;
-          margin-bottom: 12px;
-        }
-        .empty-text {
-          font-size: 16px;
-          color: #888;
-        }
-        .pending-item {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          background: #f8f9fc;
-          border-radius: 12px;
-          padding: 14px 16px;
-          margin-bottom: 10px;
-          border-left: 4px solid #ccc;
-        }
-        .pending-item.buy {
-          border-left-color: #d93025;
-        }
-        .pending-item.sell {
-          border-left-color: #188038;
-        }
-        .pending-item:last-child {
-          margin-bottom: 0;
-        }
-        .pending-left {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-        }
-        .pending-type {
-          font-size: 12px;
-          font-weight: 700;
-          padding: 3px 8px;
-          border-radius: 6px;
-          color: white;
-        }
-        .pending-type.buy {
-          background: #d93025;
-        }
-        .pending-type.sell {
-          background: #188038;
-        }
-        .pending-amount {
-          font-size: 15px;
-          font-weight: 600;
-          color: #333;
-        }
-        .pending-center {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 2px;
-        }
-        .pending-price, .pending-cost {
-          font-size: 12px;
-          color: #666;
-        }
-        .pending-right {
-          text-align: right;
-        }
-        .pending-time {
-          font-size: 13px;
-          font-weight: 600;
-          color: #f39c12;
-        }
-        .footer {
-          margin-top: 20px;
-          padding-top: 15px;
-          border-top: 1px solid #f0f2f5;
-          text-align: center;
-          font-size: 11px;
-          color: #bbb;
-        }
-      </style>
-    </head>
-    <body>
-      <div class="card">
-        <div class="header">
-          <div class="avatar">${username.charAt(0).toUpperCase()}</div>
-          <div class="user-info">
-            <div class="username">${username}</div>
-            <div class="account-label">股票账户</div>
-          </div>
-        </div>
-        ${holdingHtml}
-        ${pendingHtml}
-        <div class="footer">
-          数据更新于 ${new Date().toLocaleString('zh-CN')}
-        </div>
-      </div>
-    </body>
-    </html>
-    `
+    // 将数据注入到模板中
+    template = template.replace('{{DATA}}', JSON.stringify(data))
 
     const page = await ctx.puppeteer.page()
-    await page.setContent(html)
+    await page.setContent(template)
     const element = await page.$('.card')
     const imgBuf = await element?.screenshot({ encoding: 'binary' })
     await page.close()
     
+    return h.image(imgBuf, 'image/png')
+  }
+
+  // 渲染交易结果为 HTML 图片
+  async function renderTradeResultImage(
+    ctx: Context,
+    tradeType: 'buy' | 'sell',
+    stockName: string,
+    amount: number,
+    tradePrice: number,
+    totalCost: number,
+    currency: string,
+    priceHistory: { time: string, price: number, timestamp: number }[],
+    // 卖出时的额外信息
+    sellInfo?: {
+      avgBuyPrice: number | null  // 买入均价，null表示无记录
+      buyCost: number | null       // 买入成本
+      profit: number | null        // 盈亏金额
+      profitPercent: number | null // 盈亏百分比
+    },
+    // 买入后的持仓数量
+    newHolding?: number
+  ) {
+    const fs = require('fs')
+    const path = require('path')
+    const templatePath = path.join(__dirname, 'templates', 'trade-result.html')
+    let template = fs.readFileSync(templatePath, 'utf-8')
+
+    // 找到交易发生的时间点索引（最新的价格点）
+    const tradeIndex = priceHistory.length - 1
+
+    // 准备数据对象
+    const data = {
+      tradeType,
+      stockName,
+      amount,
+      tradePrice,
+      totalCost,
+      currency,
+      tradeTime: new Date().toLocaleString('zh-CN'),
+      prices: priceHistory.map(d => d.price),
+      timestamps: priceHistory.map(d => d.timestamp),
+      tradeIndex,
+      // 卖出额外信息
+      avgBuyPrice: sellInfo?.avgBuyPrice ?? null,
+      buyCost: sellInfo?.buyCost ?? null,
+      profit: sellInfo?.profit ?? null,
+      profitPercent: sellInfo?.profitPercent ?? null,
+      // 买入后持仓
+      newHolding: newHolding ?? amount
+    }
+
+    template = template.replace('{{DATA}}', JSON.stringify(data))
+
+    const page = await ctx.puppeteer.page()
+    await page.setContent(template)
+    const element = await page.$('.card')
+    const imgBuf = await element?.screenshot({ encoding: 'binary' })
+    await page.close()
+
     return h.image(imgBuf, 'image/png')
   }
   
