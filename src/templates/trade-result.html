@@ -1,28 +1,35 @@
+<!DOCTYPE html>
 <html>
 <head>
+  <meta charset="utf-8">
   <style>
     :root {
       --bg-color: #0c0f15;
-      --card-bg: #151921;
-      --item-bg: #1e232e;
-      --text-primary: #e1e3e6;
-      --text-secondary: #8b919e;
-      --border-color: #232730;
+      --card-bg: #161b22;
+      --item-bg: #1f242e;
+      --text-primary: #f0f3f5;
+      --text-secondary: #8b949e;
+      --border-color: #30363d;
       
       /* 语义色 */
-      --up-color: #f87171;   /* 涨/盈/买 */
-      --down-color: #4ade80; /* 跌/亏/卖 */
-      --up-bg: rgba(248, 113, 113, 0.15);
-      --down-bg: rgba(74, 222, 128, 0.15);
+      --buy-color: #f87171;   /* 涨/买 */
+      --sell-color: #4ade80; /* 跌/卖 */
+      --buy-bg: rgba(248, 113, 113, 0.15);
+      --sell-bg: rgba(74, 222, 128, 0.15);
       
-      --accent-color: #6366f1;
+      --pending-color: #eab308; /* 黄色 */
+      --pending-bg: rgba(234, 179, 8, 0.15);
+      
+      --accent-color: #58a6ff;
     }
 
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
     body { 
-      padding: 32px; 
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      /* 修改 3: 增大页面外间距 (32px -> 64px) */
+      padding: 64px; 
+      /* 还原回原本的字体组合 */
+      font-family: 'Roboto Mono', 'Trebuchet MS', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       background-color: var(--bg-color);
       width: 960px; 
       height: 720px;
@@ -36,104 +43,143 @@
       background-color: var(--card-bg); 
       width: 100%;
       height: 100%;
-      padding: 32px 40px; 
-      border-radius: 24px; 
-      box-shadow: 0 24px 48px rgba(0,0,0,0.5), inset 0 1px 1px rgba(255,255,255,0.05); 
-      border: 1px solid var(--border-color);
+      padding: 32px 40px; /* 内部左右间距也稍微增加一点 */
+      border-radius: 16px; 
+      box-shadow: 0 32px 64px rgba(0,0,0,0.6), 0 0 0 1px var(--border-color); 
       display: flex;
       flex-direction: column;
       position: relative;
+      overflow: hidden;
     }
 
-    /* Header */
-    .header {
+    /* --- 顶部区域：股票信息 + 价格 --- */
+    .top-section {
       display: flex;
       justify-content: space-between;
-      align-items: center;
+      align-items: center; 
       margin-bottom: 24px;
-      flex-shrink: 0;
     }
 
-    .stock-info {
+    .stock-group {
       display: flex;
       align-items: center;
       gap: 16px;
     }
 
     .stock-icon {
-      width: 48px;
-      height: 48px;
-      border-radius: 12px;
-      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      width: 64px; /* 稍微加大 */
+      height: 64px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, #2b313a, #1f242e);
+      border: 1px solid var(--border-color);
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 24px;
-      box-shadow: 0 8px 20px rgba(99, 102, 241, 0.3);
-      color: white;
+      font-size: 32px;
+      color: var(--text-primary);
     }
 
-    .stock-text {
+    .stock-meta {
       display: flex;
       flex-direction: column;
-      gap: 4px;
+      justify-content: center;
+      gap: 8px; 
     }
 
     .stock-name {
-      font-size: 28px;
+      font-size: 28px; /* 加大 */
       font-weight: 700;
-      color: var(--text-primary);
-      line-height: 1.2;
+      line-height: 1.1;
     }
 
-    .trade-badge {
+    /* 徽标容器 */
+    .badges-container {
+      display: flex;
+      gap: 8px;
+    }
+
+    .badge {
       display: inline-flex;
       align-items: center;
-      gap: 6px;
-      padding: 4px 10px;
+      padding: 6px 12px; /* 修改 1: 加大内边距 */
       border-radius: 6px;
-      font-size: 12px;
+      font-size: 14px; /* 修改 1: 增大字号 (13px -> 14px) */
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.5px;
-      width: fit-content;
+      line-height: 1;
     }
-    .trade-badge.buy { background: var(--up-bg); color: var(--up-color); }
-    .trade-badge.sell { background: var(--down-bg); color: var(--down-color); }
 
-    .price-info {
+    .badge.buy { background: var(--buy-bg); color: var(--buy-color); border: 1px solid rgba(248, 113, 113, 0.2); }
+    .badge.sell { background: var(--sell-bg); color: var(--sell-color); border: 1px solid rgba(74, 222, 128, 0.2); }
+    
+    .badge.pending { 
+      background: var(--pending-bg); 
+      color: var(--pending-color); 
+      border: 1px solid rgba(234, 179, 8, 0.2);
+    }
+    .badge.pending::before {
+      content: '';
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background-color: currentColor;
+      margin-right: 6px;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0% { opacity: 1; }
+      50% { opacity: 0.4; }
+      100% { opacity: 1; }
+    }
+
+    .price-group {
       text-align: right;
     }
 
-    .trade-price {
-      font-family: 'Trebuchet MS', monospace;
-      font-size: 48px;
-      font-weight: 600;
+    .main-price {
+      font-size: 56px; /* 加大 */
+      font-weight: 700;
+      letter-spacing: -2px;
       line-height: 1;
-      letter-spacing: -1px;
+      margin-bottom: 8px;
+      /* 修改 2: 强制使用数字字体 */
+      font-family: 'Roboto Mono', monospace; 
     }
-    .trade-price.buy { color: var(--up-color); }
-    .trade-price.sell { color: var(--down-color); }
+    .main-price.buy { color: var(--buy-color); }
+    .main-price.sell { color: var(--sell-color); }
 
-    .trade-detail {
-      margin-top: 8px;
-      font-size: 14px;
+    .sub-detail {
+      font-size: 16px; /* 修改 1: 增大字号 (15px -> 16px) */
       color: var(--text-secondary);
-      font-weight: 500;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 16px;
     }
-    .highlight-val { color: var(--text-primary); font-weight: 600; }
+    .sub-detail span {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .val-highlight { 
+      color: var(--text-primary); 
+      font-weight: 600; 
+      /* 修改 2: 强制使用数字字体 */
+      font-family: 'Roboto Mono', monospace;
+    }
 
-    /* Chart Area */
-    .chart-container {
+    /* --- 图表区域 --- */
+    .chart-wrapper {
       flex: 1;
       width: 100%;
       min-height: 0;
-      margin: 8px 0 24px 0;
-      border-radius: 16px;
+      margin-bottom: 32px; /* 增加底部间距 */
+      border-radius: 12px;
       background: rgba(0,0,0,0.2);
       border: 1px solid var(--border-color);
       position: relative;
-      overflow: hidden;
     }
     
     canvas {
@@ -142,370 +188,371 @@
       height: 100%;
     }
 
-    /* Footer Info Grid */
-    .footer {
+    /* --- 底部数据卡片 --- */
+    .stats-grid {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: 1fr 1fr 1fr;
       gap: 20px;
-      flex-shrink: 0;
+      height: 120px; /* 增加高度以容纳更大的字体 */
     }
 
-    .stat-card {
+    .stat-item {
       background: var(--item-bg);
-      border-radius: 16px;
-      padding: 20px;
       border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 20px 28px;
       display: flex;
       flex-direction: column;
-      gap: 8px;
-    }
-    
-    .stat-card.primary {
-      background: rgba(99, 102, 241, 0.05);
-      border-color: rgba(99, 102, 241, 0.3);
-    }
-    
-    .stat-card.profit {
-      background: rgba(248, 113, 113, 0.05);
-      border-color: rgba(248, 113, 113, 0.3);
-    }
-    
-    .stat-card.loss {
-      background: rgba(74, 222, 128, 0.05);
-      border-color: rgba(74, 222, 128, 0.3);
+      justify-content: center;
+      position: relative;
     }
 
+    .stat-item.highlight { background: rgba(88, 166, 255, 0.05); border-color: rgba(88, 166, 255, 0.2); }
+    .stat-item.profit { background: rgba(248, 113, 113, 0.05); border-color: rgba(248, 113, 113, 0.2); }
+    .stat-item.loss { background: rgba(74, 222, 128, 0.05); border-color: rgba(74, 222, 128, 0.2); }
+
     .stat-label {
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text-secondary);
+      font-size: 14px; /* 修改 1: 增大字号 (13px -> 14px) */
       text-transform: uppercase;
+      color: var(--text-secondary);
       letter-spacing: 0.5px;
+      margin-bottom: 10px;
+      font-weight: 600;
     }
 
     .stat-value {
-      font-size: 24px;
+      font-size: 28px; /* 加大 */
       font-weight: 700;
       color: var(--text-primary);
+      /* 修改 2: 强制使用数字字体 */
       font-family: 'Roboto Mono', monospace;
     }
     
-    .stat-value.profit { color: var(--up-color); }
-    .stat-value.loss { color: var(--down-color); }
+    .stat-value.profit { color: var(--buy-color); }
+    .stat-value.loss { color: var(--sell-color); }
 
     .stat-sub {
-      font-size: 12px;
+      font-size: 14px; /* 修改 1: 增大字号 */
       color: var(--text-secondary);
       opacity: 0.8;
+      margin-top: 6px;
+      /* 百分比也属于数字，用一下 Roboto Mono 更好看 */
+      font-family: 'Roboto Mono', sans-serif;
     }
 
-    .update-time {
+    /* 底部时间戳 */
+    .footer-meta {
       position: absolute;
-      bottom: 12px;
-      right: 20px;
-      font-size: 11px;
-      color: var(--text-secondary);
-      opacity: 0.4;
+      bottom: 0px;
+      right: 0px;
+      display: flex;
+      gap: 16px;
+      align-items: center;
     }
+    
+    .time-tag {
+      font-size: 12px;
+      color: var(--text-secondary);
+      padding: 6px 8px;
+      border-radius: 6px;
+      font-family: 'Roboto Mono', sans-serif; /* 包含时间数字 */
+    }
+
   </style>
 </head>
 <body>
   <div class="card">
-    <div class="header">
-      <div class="stock-info">
+    <!-- 顶部信息栏 -->
+    <div class="top-section">
+      <div class="stock-group">
         <div class="stock-icon">⚡</div>
-        <div class="stock-text">
-          <div class="stock-name" id="stock-name"></div>
-          <div class="trade-badge" id="trade-badge">
-            <span class="icon"></span>
-            <span class="text"></span>
-          </div>
+        <div class="stock-meta">
+          <div class="stock-name" id="stock-name">--</div>
+          <!-- 这里会动态插入徽标 -->
+          <div class="badges-container" id="badges-container"></div>
         </div>
       </div>
-      <div class="price-info">
-        <div class="trade-price" id="trade-price"></div>
-        <div class="trade-detail">
-          成交 <span class="highlight-val" id="trade-amount"></span> 股 · 总额 <span class="highlight-val" id="trade-total"></span>
+      
+      <div class="price-group">
+        <div class="main-price" id="trade-price">--</div>
+        <div class="sub-detail">
+          <span>数量 <b class="val-highlight" id="trade-amount">--</b></span>
+          <span style="opacity: 0.2">|</span>
+          <span>总额 <b class="val-highlight" id="trade-total">--</b></span>
         </div>
       </div>
     </div>
 
-    <div class="chart-container" id="chart-container">
+    <!-- 图表区域 -->
+    <div class="chart-wrapper" id="chart-container">
       <canvas id="chart"></canvas>
     </div>
 
-    <div class="footer" id="footer"></div>
-    <div class="update-time" id="update-time"></div>
+    <!-- 底部数据 -->
+    <div class="stats-grid" id="stats-grid">
+      <!-- JS填充 -->
+    </div>
+
+    <!-- 仅用于显示时间，不干扰布局 -->
+    <div class="footer-meta">
+      <div class="time-tag" id="trade-time">--</div>
+    </div>
   </div>
 
+  <!-- 数据源 -->
   <script type="application/json" id="data-source">
 {{DATA}}
   </script>
+
   <script>
-    const DATA = JSON.parse(document.getElementById('data-source').textContent);
-    const isBuy = DATA.tradeType === 'buy';
+    // 模拟数据用于测试
+    /*
+    const TEST_DATA = {
+      tradeType: 'buy',
+      stockName: 'NVDA · NVIDIA Corp',
+      status: 'pending',
+      pendingMinutes: 5.5,
+      pendingEndTime: '14:35',
+      tradePrice: 485.20,
+      amount: 10,
+      totalCost: 4852.00,
+      tradeTime: '2023-10-27 10:30:05',
+      newHolding: 150,
+      currency: 'USD',
+      prices: [480, 482, 481, 483, 485, 484, 486, 485.2, 487, 488, 486],
+      timestamps: [1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000, 11000],
+      tradeIndex: 7
+    };
+    */
     
-    // 颜色定义
+    let DATA;
+    try {
+      DATA = JSON.parse(document.getElementById('data-source').textContent);
+    } catch (e) {
+      DATA = typeof TEST_DATA !== 'undefined' ? TEST_DATA : {};
+    }
+
+    const isBuy = DATA.tradeType === 'buy';
+    const status = DATA.status || 'settled';
+    const isPending = status === 'pending';
+    
     const colors = {
-      up: '#f87171',
-      down: '#4ade80',
-      text: '#e1e3e6',
-      grid: '#2a2e39',
-      label: '#64748b'
+      buy: '#f87171',
+      sell: '#4ade80',
+      pending: '#eab308',
+      grid: '#30363d',
+      text: '#f0f3f5',
+      textDim: '#8b949e'
     };
     
-    // 主色调：买入用红，卖出用绿（或者根据盈亏）
-    // 这里统一：买入=红(Up/Action)，卖出=绿(Down/Action)
-    const mainColor = isBuy ? colors.up : colors.down;
+    const mainColor = isBuy ? colors.buy : colors.sell;
 
-    // --- 渲染 DOM ---
-    document.getElementById('stock-name').textContent = DATA.stockName;
-    
-    const badge = document.getElementById('trade-badge');
-    badge.classList.add(DATA.tradeType);
-    badge.querySelector('.icon').textContent = isBuy ? '📈' : '📉';
-    badge.querySelector('.text').textContent = isBuy ? '买入成功 BUY' : '卖出成功 SELL';
-
-    const priceEl = document.getElementById('trade-price');
-    priceEl.textContent = DATA.tradePrice.toFixed(2);
-    priceEl.classList.add(DATA.tradeType);
-
+    // --- 1. 渲染顶部基本信息 ---
+    document.getElementById('stock-name').textContent = DATA.stockName || 'Unknown Stock';
+    document.getElementById('trade-price').textContent = DATA.tradePrice.toFixed(2);
+    document.getElementById('trade-price').className = `main-price ${DATA.tradeType}`;
     document.getElementById('trade-amount').textContent = DATA.amount;
     document.getElementById('trade-total').textContent = DATA.totalCost.toFixed(2);
-    document.getElementById('update-time').textContent = `交易时间 ${DATA.tradeTime}`;
+    document.getElementById('trade-time').textContent = (isPending ? '下单时间 ' : '交易时间 ') + DATA.tradeTime;
 
-    const footer = document.getElementById('footer');
+    // --- 2. 徽标渲染 ---
+    const badgesContainer = document.getElementById('badges-container');
+    badgesContainer.innerHTML = '';
+
+    // (A) 交易类型徽标
+    const typeBadge = document.createElement('div');
+    typeBadge.className = `badge ${DATA.tradeType}`;
+    typeBadge.innerHTML = isBuy ? 'BUY / 买入' : 'SELL / 卖出';
+    badgesContainer.appendChild(typeBadge);
+
+    // (B) 状态徽标
+    if (isPending) {
+      const pendingBadge = document.createElement('div');
+      pendingBadge.className = 'badge pending';
+      const pendingText = DATA.pendingEndTime 
+        ? `PENDING 预计 ${DATA.pendingEndTime} 完成` 
+        : 'PENDING 挂单处理中';
+      pendingBadge.innerHTML = pendingText;
+      badgesContainer.appendChild(pendingBadge);
+    }
+
+    // --- 3. 底部数据卡片渲染 ---
+    const statsGrid = document.getElementById('stats-grid');
     if (isBuy) {
-      footer.innerHTML = `
-        <div class="stat-card primary">
-          <div class="stat-label">持仓数量 Holdings</div>
+      statsGrid.innerHTML = `
+        <div class="stat-item highlight">
+          <div class="stat-label">Current Holdings 持仓</div>
           <div class="stat-value">${DATA.newHolding}</div>
           <div class="stat-sub">股</div>
         </div>
-        <div class="stat-card">
-          <div class="stat-label">成交均价 Avg Price</div>
+        <div class="stat-item">
+          <div class="stat-label">Avg Price 均价</div>
           <div class="stat-value">${DATA.tradePrice.toFixed(2)}</div>
-          <div class="stat-sub">每股</div>
+          <div class="stat-sub">${DATA.currency}</div>
         </div>
-        <div class="stat-card">
-          <div class="stat-label">当前市值 Market Value</div>
+        <div class="stat-item">
+          <div class="stat-label">Total Value 市值</div>
           <div class="stat-value">${(DATA.newHolding * DATA.tradePrice).toFixed(2)}</div>
           <div class="stat-sub">${DATA.currency}</div>
         </div>
       `;
     } else {
-      const hasProfit = DATA.profit !== null;
-      const isProfit = hasProfit && DATA.profit >= 0;
-      const profitClass = hasProfit ? (isProfit ? 'profit' : 'loss') : '';
+      const profit = DATA.profit;
+      const isProfit = profit >= 0;
+      const profitClass = isProfit ? 'profit' : 'loss';
       const profitSign = isProfit ? '+' : '';
-      const profitColorClass = isProfit ? 'profit' : 'loss';
 
-      footer.innerHTML = `
-        <div class="stat-card primary">
-          <div class="stat-label">卖出收益 Revenue</div>
+      statsGrid.innerHTML = `
+        <div class="stat-item highlight">
+          <div class="stat-label">Revenue 卖出金额</div>
           <div class="stat-value">${DATA.totalCost.toFixed(2)}</div>
           <div class="stat-sub">${DATA.currency}</div>
         </div>
-        <div class="stat-card">
-          <div class="stat-label">买入成本 Cost Basis</div>
-          <div class="stat-value">${hasProfit ? DATA.buyCost.toFixed(2) : '--'}</div>
-          <div class="stat-sub">${hasProfit ? '@ ' + DATA.avgBuyPrice.toFixed(2) : '无记录'}</div>
+        <div class="stat-item">
+          <div class="stat-label">Cost Basis 买入成本</div>
+          <div class="stat-value">${DATA.avgBuyPrice ? DATA.avgBuyPrice.toFixed(2) : '--'}</div>
+          <div class="stat-sub">每股</div>
         </div>
-        <div class="stat-card ${profitClass}">
-          <div class="stat-label">本次盈亏 P/L</div>
-          <div class="stat-value ${profitColorClass}">${hasProfit ? profitSign + DATA.profit.toFixed(2) : '--'}</div>
-          <div class="stat-sub">${hasProfit ? profitSign + DATA.profitPercent.toFixed(2) + '%' : ''}</div>
+        <div class="stat-item ${profitClass}">
+          <div class="stat-label">P/L 盈亏</div>
+          <div class="stat-value ${profitClass}">${profit !== null ? profitSign + profit.toFixed(2) : '--'}</div>
+          <div class="stat-sub">${profit !== null ? profitSign + DATA.profitPercent.toFixed(2) + '%' : ''}</div>
         </div>
       `;
     }
 
-    // --- 绘制图表 ---
+
+    // --- 4. 图表绘制 ---
     const container = document.getElementById('chart-container');
     const canvas = document.getElementById('chart');
-    
-    // 动态设置 Canvas 分辨率以匹配容器大小 (x2 for Retina)
     const rect = container.getBoundingClientRect();
-    const dpr = 2; // 强制高分屏渲染
+    const dpr = window.devicePixelRatio || 2;
+    
     canvas.width = rect.width * dpr;
     canvas.height = rect.height * dpr;
     
     const ctx = canvas.getContext('2d');
-    ctx.scale(dpr, dpr); // 缩放上下文
+    ctx.scale(dpr, dpr);
     
     const W = rect.width;
     const H = rect.height;
-    const padding = { top: 40, bottom: 40, left: 10, right: 80 }; // 右侧留给价格标签
+    const pad = { top: 30, bottom: 30, left: 10, right: 60 }; 
 
-    const prices = DATA.prices;
-    const timestamps = DATA.timestamps;
-    const tradeIndex = DATA.tradeIndex;
-
-    // 计算范围
-    const maxPrice = Math.max(...prices);
-    const minPrice = Math.min(...prices);
-    const range = maxPrice - minPrice || 1;
-    // 留白
-    const yMin = minPrice - range * 0.2;
-    const yMax = maxPrice + range * 0.2;
-    const yRange = yMax - yMin;
-    
-    const tStart = timestamps[0];
-    const tEnd = timestamps[timestamps.length - 1];
-    const tRange = tEnd - tStart || 1;
-
-    const getX = t => padding.left + ((t - tStart) / tRange) * (W - padding.left - padding.right);
-    const getY = p => H - padding.bottom - ((p - yMin) / yRange) * (H - padding.top - padding.bottom);
-
-    // 1. 绘制网格
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
-    ctx.lineWidth = 1;
-    
-    // 横线
-    const gridCount = 5;
-    for (let i = 0; i <= gridCount; i++) {
-      const y = H - padding.bottom - (i / gridCount) * (H - padding.top - padding.bottom);
-      ctx.beginPath();
-      ctx.moveTo(padding.left, y);
-      ctx.lineTo(W - padding.right, y);
-      ctx.stroke();
+    if (DATA.prices && DATA.prices.length > 0) {
+      const prices = DATA.prices;
+      const minP = Math.min(...prices);
+      const maxP = Math.max(...prices);
+      const rangeP = maxP - minP || 1;
       
-      // Y轴标签
-      const val = yMin + (i / gridCount) * yRange;
-      ctx.fillStyle = colors.label;
-      ctx.font = '500 11px "Roboto Mono", monospace';
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(val.toFixed(2), W - padding.right + 10, y);
-    }
+      const yMin = minP - rangeP * 0.2;
+      const yMax = maxP + rangeP * 0.2;
+      const yRange = yMax - yMin;
+      
+      const stepX = (W - pad.left - pad.right) / (prices.length - 1);
 
-    // 2. 路径点
-    const points = prices.map((p, i) => ({
-      x: getX(timestamps[i]),
-      y: getY(p)
-    }));
+      const getX = i => pad.left + i * stepX;
+      const getY = p => H - pad.bottom - ((p - yMin) / yRange) * (H - pad.top - pad.bottom);
 
-    // 3. 渐变区域
-    const gradient = ctx.createLinearGradient(0, padding.top, 0, H - padding.bottom);
-    gradient.addColorStop(0, isBuy ? 'rgba(248, 113, 113, 0.2)' : 'rgba(74, 222, 128, 0.2)');
-    gradient.addColorStop(1, 'rgba(0,0,0,0)');
-
-    ctx.beginPath();
-    ctx.moveTo(points[0].x, H - padding.bottom);
-    if (points.length > 1) {
-      ctx.lineTo(points[0].x, points[0].y);
-      for (let i = 0; i < points.length - 1; i++) {
-        const p0 = points[i];
-        const p1 = points[i + 1];
-        const midX = (p0.x + p1.x) / 2;
-        const midY = (p0.y + p1.y) / 2;
-        ctx.quadraticCurveTo(p0.x, p0.y, midX, midY);
+      // (A) 绘制网格线
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
+      ctx.lineWidth = 1;
+      const gridLines = 4;
+      for (let i = 0; i <= gridLines; i++) {
+        const y = H - pad.bottom - (i / gridLines) * (H - pad.top - pad.bottom);
+        ctx.beginPath();
+        ctx.moveTo(pad.left, y);
+        ctx.lineTo(W - pad.right, y);
+        ctx.stroke();
+        
+        // 价格标签 (字体也同步调整为 Roboto Mono 且加大)
+        const val = yMin + (i / gridLines) * yRange;
+        ctx.fillStyle = colors.textDim;
+        // 修改 1 & 2: 增大字号到 14px 并使用 Roboto Mono
+        ctx.font = '500 14px "Roboto Mono", monospace'; 
+        ctx.textAlign = 'left';
+        ctx.fillText(val.toFixed(2), W - pad.right + 8, y + 4);
       }
-      ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
-    }
-    ctx.lineTo(points[points.length - 1].x, H - padding.bottom);
-    ctx.closePath();
-    ctx.fillStyle = gradient;
-    ctx.fill();
 
-    // 4. 曲线
-    ctx.beginPath();
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = mainColor;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    if (points.length > 1) {
+      // (B) 绘制面积图
+      const points = prices.map((p, i) => ({ x: getX(i), y: getY(p) }));
+      
+      ctx.beginPath();
+      ctx.moveTo(points[0].x, H - pad.bottom);
+      points.forEach(p => ctx.lineTo(p.x, p.y));
+      ctx.lineTo(points[points.length-1].x, H - pad.bottom);
+      ctx.closePath();
+      
+      const gradient = ctx.createLinearGradient(0, pad.top, 0, H - pad.bottom);
+      gradient.addColorStop(0, isBuy ? 'rgba(248, 113, 113, 0.25)' : 'rgba(74, 222, 128, 0.25)');
+      gradient.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = gradient;
+      ctx.fill();
+
+      // (C) 绘制折线
+      ctx.beginPath();
       ctx.moveTo(points[0].x, points[0].y);
       for (let i = 0; i < points.length - 1; i++) {
-        const p0 = points[i];
-        const p1 = points[i + 1];
-        const midX = (p0.x + p1.x) / 2;
-        const midY = (p0.y + p1.y) / 2;
-        ctx.quadraticCurveTo(p0.x, p0.y, midX, midY);
+        const xc = (points[i].x + points[i + 1].x) / 2;
+        const yc = (points[i].y + points[i + 1].y) / 2;
+        ctx.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
       }
-      ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
-    }
-    ctx.stroke();
-
-    // 5. 交易点标记
-    const tradePoint = points[tradeIndex];
-    
-    // 垂直虚线
-    ctx.beginPath();
-    ctx.setLineDash([4, 4]);
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-    ctx.lineWidth = 1;
-    ctx.moveTo(tradePoint.x, padding.top);
-    ctx.lineTo(tradePoint.x, H - padding.bottom);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    // 扩散光圈
-    const glow = ctx.createRadialGradient(tradePoint.x, tradePoint.y, 0, tradePoint.x, tradePoint.y, 20);
-    glow.addColorStop(0, isBuy ? 'rgba(248, 113, 113, 0.6)' : 'rgba(74, 222, 128, 0.6)');
-    glow.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = glow;
-    ctx.beginPath();
-    ctx.arc(tradePoint.x, tradePoint.y, 20, 0, Math.PI * 2);
-    ctx.fill();
-
-    // 实心点
-    ctx.fillStyle = '#fff';
-    ctx.beginPath();
-    ctx.arc(tradePoint.x, tradePoint.y, 5, 0, Math.PI * 2);
-    ctx.fill();
-    
-    // 交易价格标签
-    const labelText = DATA.tradePrice.toFixed(2);
-    ctx.font = 'bold 14px "Roboto Mono", monospace';
-    const labelW = ctx.measureText(labelText).width + 16;
-    const labelH = 24;
-    const labelX = tradePoint.x - labelW / 2;
-    const labelY = tradePoint.y - 32;
-    
-    ctx.fillStyle = mainColor;
-    ctx.beginPath();
-    ctx.roundRect(labelX, labelY, labelW, labelH, 6);
-    ctx.fill();
-    
-    // 小三角
-    ctx.beginPath();
-    ctx.moveTo(tradePoint.x - 6, labelY + labelH);
-    ctx.lineTo(tradePoint.x + 6, labelY + labelH);
-    ctx.lineTo(tradePoint.x, labelY + labelH + 6);
-    ctx.fill();
-    
-    ctx.fillStyle = '#fff';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(labelText, tradePoint.x, labelY + labelH/2 + 1);
-
-    // 6. 卖出时的买入成本线
-    if (!isBuy && DATA.avgBuyPrice) {
-      const buyY = getY(DATA.avgBuyPrice);
+      ctx.lineTo(points[points.length-1].x, points[points.length-1].y);
       
+      ctx.strokeStyle = mainColor;
+      ctx.lineWidth = 2.5;
+      ctx.lineCap = 'round';
+      ctx.stroke();
+
+      // (D) 绘制交易点
+      const tIdx = DATA.tradeIndex !== undefined ? DATA.tradeIndex : points.length - 1;
+      const tp = points[tIdx];
+
       ctx.beginPath();
-      ctx.setLineDash([6, 4]);
-      ctx.strokeStyle = 'rgba(99, 102, 241, 0.5)'; // Indigo
-      ctx.lineWidth = 1.5;
-      ctx.moveTo(padding.left, buyY);
-      ctx.lineTo(W - padding.right, buyY);
+      ctx.setLineDash([4, 4]);
+      ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+      ctx.lineWidth = 1;
+      ctx.moveTo(tp.x, pad.top);
+      ctx.lineTo(tp.x, H - pad.bottom);
       ctx.stroke();
       ctx.setLineDash([]);
-      
-      // 标签
-      const buyLabel = "COST " + DATA.avgBuyPrice.toFixed(2);
-      ctx.font = 'bold 11px "Roboto Mono", monospace';
-      const bLabelW = ctx.measureText(buyLabel).width + 12;
-      
-      ctx.fillStyle = '#6366f1';
+
+      const glow = ctx.createRadialGradient(tp.x, tp.y, 0, tp.x, tp.y, 16);
+      glow.addColorStop(0, isBuy ? 'rgba(248, 113, 113, 0.6)' : 'rgba(74, 222, 128, 0.6)');
+      glow.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = glow;
       ctx.beginPath();
-      ctx.roundRect(W - padding.right + 8, buyY - 10, bLabelW, 20, 4);
+      ctx.arc(tp.x, tp.y, 16, 0, Math.PI * 2);
       ctx.fill();
-      
+
       ctx.fillStyle = '#fff';
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(buyLabel, W - padding.right + 14, buyY);
+      ctx.beginPath();
+      ctx.arc(tp.x, tp.y, 4, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 价格标签 Tag (同步字体和大小)
+      const tagText = DATA.tradePrice.toFixed(2);
+      // 修改 1 & 2: 增大字号到 14px 并使用 Roboto Mono
+      ctx.font = 'bold 14px "Roboto Mono", monospace'; 
+      const tm = ctx.measureText(tagText);
+      const tagW = tm.width + 16;
+      const tagH = 26; // 稍微增加高度适应大字号
+      const tagX = tp.x - tagW / 2;
+      const tagY = tp.y - 36;
+
+      ctx.fillStyle = mainColor;
+      ctx.beginPath();
+      ctx.roundRect(tagX, tagY, tagW, tagH, 4);
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.moveTo(tp.x - 4, tagY + tagH);
+      ctx.lineTo(tp.x + 4, tagY + tagH);
+      ctx.lineTo(tp.x, tagY + tagH + 4);
+      ctx.fill();
+
+      ctx.fillStyle = '#1e232e';
+      ctx.textAlign = 'center';
+      ctx.fillText(tagText, tp.x, tagY + 17); // 微调垂直对齐
     }
 
   </script>

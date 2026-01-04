@@ -1,10 +1,12 @@
-# koishi-plugin-monetary-bourse
+# koishi-plugin-monetary-bourse · v2.0.0
 
 [![npm](https://img.shields.io/npm/v/koishi-plugin-monetary-bourse?style=flat-square)](https://www.npmjs.com/package/koishi-plugin-monetary-bourse)
 
 为 Koishi 提供基于 `monetary` 通用货币系统的股票交易所功能。
 
 本插件模拟了一个具备自动宏观调控、25种经典K线形态、智能概率博弈和可视化交割单的深度拟真股票市场。用户可以使用机器人通用的货币（如信用点）进行股票买卖、炒股理财。
+
+> 版本：**2.0.0**
 
 ## ✨ 特性
 
@@ -139,6 +141,13 @@ A: 股价采用 **"智能期望模型"** 驱动，更贴近真实博弈：
 
 ## 更新记录
 
+- **2.0.0**
+  - **perf/alg**: 提升随机噪声强度，实时曲线更具呼吸感，减少单调走势。
+  - **ui/layout**: 重构交易详情页布局，分离股票信息与价格展示区域，底部改为 Grid 布局，并将页面外间距增至 64px 以提升视觉呼吸感。
+  - **feat(ui/display)**: 优化状态徽标逻辑，支持「交易方向」与「挂单中」状态同时并列显示，并为 Pending 状态增加呼吸动画。
+  - **ui/typography**: 显著增大详情页关键数值与标签字号，回滚并强制使用 Roboto Mono 等宽字体，确保金融数据对齐与专业感。
+  - **fix(ui/trade)**: 交易结果回单在存在冻结时间时也会即时弹出；修正时间戳位置，将其强制固定于页面右下角。
+  
 - **Alpha.10**
   - **feat(core)**: 引入 **25 种** 全新 K 线形态库；新增 `selectPatternByExpectation` 智能调度算法，按价格偏离度动态调整形态概率以实现“估值修复”。
   - **feat(ui)**: 新增交易交割单（成交结算图），并将 HTML 模板模板化重构，支持高分辨率渲染与更友好的样式复用。
