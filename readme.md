@@ -1,12 +1,12 @@
-# koishi-plugin-monetary-bourse · v2.0.0
+# koishi-plugin-monetary-bourse
 
-[![npm](https://img.shields.io/npm/v/koishi-plugin-monetary-bourse?style=flat-square)](https://www.npmjs.com/package/koishi-plugin-monetary-bourse)
+[![npm](https://img.shields.io/npm/v/koishi-plugin-monetary-bourse?style=flat-square)](https://www.npmjs.com/package/koishi-plugin-monetary-bourse) [![GitHub stars](https://img.shields.io/github/stars/BYWled/koishi-plugin-monetary-bourse?style=flat-square&logo=github)](https://github.com/BYWled/koishi-plugin-monetary-bourse) [![Gitee](https://img.shields.io/badge/Gitee-Project-c71d23?style=flat-square&logo=gitee&logoColor=white)](https://gitee.com/BYWled/koishi-plugin-monetary-bourse)
 
 为 Koishi 提供基于 `monetary` 通用货币系统的股票交易所功能。
 
 本插件模拟了一个具备自动宏观调控、25种经典K线形态、智能概率博弈和可视化交割单的深度拟真股票市场。用户可以使用机器人通用的货币（如信用点）进行股票买卖、炒股理财。
 
-> 版本：**2.0.1**
+> 版本：**2.0.2**
 
 ## ✨ 特性
 
@@ -141,53 +141,58 @@ A: 股价采用 **"智能期望模型"** 驱动，更贴近真实博弈：
 
 ## 更新记录
 
-- **2.0.1**
-  - **fix(build)**: 将静态 HTML 打包进 `lib`，修复构建未更新静态页面的问题
+### 2.0.2
 
-- **2.0.0**
-  - **perf/alg**: 提升随机噪声强度，实时曲线更具呼吸感，减少单调走势。
-  - **ui/layout**: 重构交易详情页布局，分离股票信息与价格展示区域，底部改为 Grid 布局，并将页面外间距增至 64px 以提升视觉呼吸感。
-  - **feat(ui/display)**: 优化状态徽标逻辑，支持「交易方向」与「挂单中」状态同时并列显示，并为 Pending 状态增加呼吸动画。
-  - **ui/typography**: 显著增大详情页关键数值与标签字号，回滚并强制使用 Roboto Mono 等宽字体，确保金融数据对齐与专业感。
-  - **fix(ui/trade)**: 交易结果回单在存在冻结时间时也会即时弹出；修正时间戳位置，将其强制固定于页面右下角。
-  
-- **Alpha.10**
-  - **feat(core)**: 引入 **25 种** 全新 K 线形态库；新增 `selectPatternByExpectation` 智能调度算法，按价格偏离度动态调整形态概率以实现“估值修复”。
-  - **feat(ui)**: 新增交易交割单（成交结算图），并将 HTML 模板模板化重构，支持高分辨率渲染与更友好的样式复用。
-  - **perf**: 优化持仓成本计算、挂单排队体验与兼容旧数据的处理逻辑。
+- **doc**: 更新同步更新Gitee和Github链接至`README`
 
-- **Alpha.9**
-  - **fix(build)**: 将静态 HTML 打包进 `lib`，修复构建遗漏导致的插件无法加载问题。
+### 2.0.1
+- **fix(build)**: 将静态 HTML 打包进 `lib`，修复构建未更新静态页面的问题
 
-- **Alpha.8**
-  - **feat(ui)**: 提取并模板化走势图（`src/templates/stock-chart.html`），全面视觉优化（深色玻璃拟态、坐标轴与字体改进、增强可读性）。
-  - **feat(queue)**: 将挂单改为用户串行排队，防止拆单规避冻结时长（T+0 防绕过）。
-  - **perf/alg**: 提升基础波动率与形态影响力，改进周波浪与均值回归；新增 `enableDebug` 调试开关以便开发验证。
+### 2.0.0
+- **perf/alg**: 提升随机噪声强度，实时曲线更具呼吸感，减少单调走势。
+- **ui/layout**: 重构交易详情页布局，分离股票信息与价格展示区域，底部改为 Grid 布局，并将页面外间距增至 64px 以提升视觉呼吸感。
+- **feat(ui/display)**: 优化状态徽标逻辑，支持「交易方向」与「挂单中」状态同时并列显示，并为 Pending 状态增加呼吸动画。
+- **ui/typography**: 显著增大详情页关键数值与标签字号，回滚并强制使用 Roboto Mono 等宽字体，确保金融数据对齐与专业感。
+- **fix(ui/trade)**: 交易结果回单在存在冻结时间时也会即时弹出；修正时间戳位置，将其强制固定于页面右下角。
 
-- **Alpha.7**
-  - **feat(model)**: 引入几何布朗运动 + 均值回归，添加正态分布噪声与软着陆限幅，改善日内波动特性以提高拟真度。
+### Alpha.10
+- **feat(core)**: 引入 **25 种** 全新 K 线形态库；新增 `selectPatternByExpectation` 智能调度算法，按价格偏离度动态调整形态概率以实现“估值修复”。
+- **feat(ui)**: 新增交易交割单（成交结算图），并将 HTML 模板模板化重构，支持高分辨率渲染与更友好的样式复用。
+- **perf**: 优化持仓成本计算、挂单排队体验与兼容旧数据的处理逻辑。
 
-- **Alpha.6**
-  - **refactor**: 采用百分比波动合成模型，解决长期振幅失控并提升稳定性。
-  - **fix**: 修正手动宏观调控在部分场景下重置基准价的问题。
+### Alpha.9
+- **fix(build)**: 将静态 HTML 打包进 `lib`，修复构建遗漏导致的插件无法加载问题。
 
-- **Alpha.5**
-  - **refactor**: 重写走势引擎为绝对价格合成（基准价 + 趋势 + 日内波动 + 周波浪 + 噪声），修复长期运行抖动并强化 ±50% 涨跌幅限幅。
+### Alpha.8
+- **feat(ui)**: 提取并模板化走势图（`src/templates/stock-chart.html`），全面视觉优化（深色玻璃拟态、坐标轴与字体改进、增强可读性）。
+- **feat(queue)**: 将挂单改为用户串行排队，防止拆单规避冻结时长（T+0 防绕过）。
+- **perf/alg**: 提升基础波动率与形态影响力，改进周波浪与均值回归；新增 `enableDebug` 调试开关以便开发验证。
 
-- **1.1.1 (Alpha.4)**
-  - **feat**: 引入硬性 ±50% 涨跌幅上限并随机刷新宏观目标以增强稳定性和随机性。
-  - **fix**: 避免在更新负载中修改主键；移除过时的手动控制配置；新增调试命令以便验证逻辑。
+### Alpha.7
+- **feat(model)**: 引入几何布朗运动 + 均值回归，添加正态分布噪声与软着陆限幅，改善日内波动特性以提高拟真度。
 
-- **1.1.0 (Alpha.3)**
-  - **feat**: 新增持仓盈亏与成本追踪（`totalCost`）及持仓卡片渲染（Puppeteer），提升展示与交互体验。
-  - **fix**: 统一金额与价格为两位小数以保证精度与兼容性；当 `maxFreezeTime = 0` 时即时完成交易处理。
+### Alpha.6
+- **refactor**: 采用百分比波动合成模型，解决长期振幅失控并提升稳定性。
+- **fix**: 修正手动宏观调控在部分场景下重置基准价的问题。
 
-- **1.0.0**
-  - **fix**: 修复因更新负载包含主键而导致的 `TypeError: cannot modify primary key`，提高数据库兼容性。
+### Alpha.5
+- **refactor**: 重写走势引擎为绝对价格合成（基准价 + 趋势 + 日内波动 + 周波浪 + 噪声），修复长期运行抖动并强化 ±50% 涨跌幅限幅。
 
-- **Alpha.2**
-  - **feat**: 扩展日内走势剧本并叠加周级波浪，改进 Puppeteer 渲染以减少横轴标签重叠与视觉冲突。
-  - **note**: 历史版本曾存在主键相关问题，后续版本已逐步修复。
+### 1.1.1 (Alpha.4)
+- **feat**: 引入硬性 ±50% 涨跌幅上限并随机刷新宏观目标以增强稳定性和随机性。
+- **fix**: 避免在更新负载中修改主键；移除过时的手动控制配置；新增调试命令以便验证逻辑。
 
-- **Alpha.1**
-  - **feat**: 初始发布：实现买卖、挂单、资金冻结、历史行情存储及 `stock` 系列基础指令，支持与 `monetary` / `monetary-bank` 的基础联动。
+### 1.1.0 (Alpha.3)
+- **feat**: 新增持仓盈亏与成本追踪（`totalCost`）及持仓卡片渲染（Puppeteer），提升展示与交互体验。
+- **fix**: 统一金额与价格为两位小数以保证精度与兼容性；当 `maxFreezeTime = 0` 时即时完成交易处理。
+
+### 1.0.0
+- **fix**: 修复因更新负载包含主键而导致的 `TypeError: cannot modify primary key`，提高数据库兼容性。
+
+### Alpha.2
+- **feat**: 扩展日内走势剧本并叠加周级波浪，改进 Puppeteer 渲染以减少横轴标签重叠与视觉冲突。
+- **note**: 历史版本曾存在主键相关问题，后续版本已逐步修复。
+
+### Alpha.1
+- **feat**: 初始发布：实现买卖、挂单、资金冻结、历史行情存储及 `stock` 系列基础指令，支持与 `monetary` / `monetary-bank` 的基础联动。
+
