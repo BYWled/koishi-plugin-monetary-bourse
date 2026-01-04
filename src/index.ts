@@ -96,10 +96,6 @@ export interface Config {
   freezeCostPerMinute: number // 每多少货币计为1分钟冻结时间
   minFreezeTime: number // 最小冻结时间（分钟）
   maxFreezeTime: number // 最大冻结时间（分钟）
-  // 手动调控
-  enableManualControl: boolean
-  manualTargetPrice: number
-  manualDuration: number
   // 股市开关
   marketStatus: 'open' | 'close' | 'auto'
 }
@@ -126,12 +122,6 @@ export const Config: Schema<Config> = Schema.intersect([
     minFreezeTime: Schema.number().min(0).default(10).description('最小冻结时间(分钟)'),
     maxFreezeTime: Schema.number().min(0).default(1440).description('最大交易冻结时间(分钟)'),
   }).description('冻结机制'),
-
-  Schema.object({
-    enableManualControl: Schema.boolean().default(false).description('开启手动宏观调控(覆盖自动)'),
-    manualTargetPrice: Schema.number().min(0.01).default(1000).description('手动目标价格'),
-    manualDuration: Schema.number().min(1).default(24).description('手动调控周期(小时)'),
-  }).description('手动宏观调控'),
 ])
 
 // --- 核心实现 ---
@@ -193,6 +183,13 @@ export function apply(ctx: Context, config: Config) {
 
   // 追踪市场开市状态，用于在开市时切换K线模型
   let wasMarketOpen = false
+  // 记录当日开盘价，用于日内涨跌幅限制
+  let dailyOpenPrice: number | null = null
+  // 随机自动宏观调控参数（频率与幅度）
+  let macroWaveCount = 7
+  let macroWeeklyAmplitudeRatio = 0.08
+  // 随机自动宏观目标刷新时间
+  let nextMacroSwitchTime: Date | null = null
 
   // 市场定时任务（每 2 分钟运行一次）
   ctx.setInterval(async () => {
@@ -202,6 +199,11 @@ export function apply(ctx: Context, config: Config) {
     if (isOpen && !wasMarketOpen) {
       // 开市了，切换K线模型
       switchKLinePattern('自动开市')
+      // 记录当日开盘价（用于日内限制）
+      dailyOpenPrice = currentPrice
+      // 初始化随机宏观刷新时间（6-24小时）
+      const hours = 6 + Math.floor(Math.random() * 19)
+      nextMacroSwitchTime = new Date(Date.now() + hours * 3600 * 1000)
     }
     wasMarketOpen = isOpen
     
@@ -543,79 +545,54 @@ export function apply(ctx: Context, config: Config) {
       if (!(state.endTime instanceof Date)) state.endTime = new Date(state.endTime)
     }
 
-    // 优先处理手动配置
-    if (config.enableManualControl) {
-      // 如果当前不是手动模式，或者目标价格变动，或者状态不存在，则重置为配置的手动状态
-      if (!state || state.mode !== 'manual' || Math.abs(state.targetPrice - config.manualTargetPrice) > 0.01) {
-         const durationHours = config.manualDuration
-         const targetPrice = config.manualTargetPrice
-         const endTime = new Date(now.getTime() + durationHours * 3600 * 1000)
-         const minutes = durationHours * 60
-         const trendFactor = (targetPrice - currentPrice) / minutes
-
-         const newState: BourseState = {
-            key: 'macro_state',
-            lastCycleStart: now,
-            startPrice: currentPrice,
-            targetPrice,
-            trendFactor,
-            mode: 'manual',
-            endTime
-         }
-         if (!state) await ctx.database.create('bourse_state', newState)
-         else {
-           // 排除主键字段，只更新其他字段
-           const { key, ...updateFields } = newState
-           await ctx.database.set('bourse_state', { key: 'macro_state' }, updateFields)
-         }
-         state = newState
-      }
-    }
+    // 不再支持配置文件触发手动调控；仅当 state.mode === 'manual' 且未过期时沿用手动参数
 
     // 状态初始化或过期检查 (仅在非强制手动模式下运行自动逻辑)
     let needNewState = false
-    if (!config.enableManualControl) {
-      if (!state) {
-        needNewState = true
-      } else {
-        // 检查是否过期（一周周期）
-        const endTime = state.endTime || new Date(state.lastCycleStart.getTime() + 7 * 24 * 3600 * 1000)
-        if (now > endTime) {
-          needNewState = true
-        }
+    if (!state) {
+      needNewState = true
+    } else {
+      const endTime = state.endTime || new Date(state.lastCycleStart.getTime() + 7 * 24 * 3600 * 1000)
+      if (state.mode !== 'manual' && now > endTime) needNewState = true
+    }
+
+    const createAutoState = async () => {
+      const durationHours = 7 * 24 // 一周周期
+      const fluctuation = 0.30
+      const targetRatio = 1 + (Math.random() * 2 - 1) * fluctuation
+      const targetPrice = currentPrice * targetRatio
+      const endTime = new Date(now.getTime() + durationHours * 3600 * 1000)
+      const minutes = durationHours * 60
+      const trendFactor = (targetPrice - currentPrice) / minutes
+      // 刷新宏观频率参数
+      macroWaveCount = 5 + Math.floor(Math.random() * 6) // 5-10
+      macroWeeklyAmplitudeRatio = 0.06 + Math.random() * 0.06 // 6%-12%
+      // 下一次宏观目标随机刷新（6-24小时）
+      const hours = 6 + Math.floor(Math.random() * 19)
+      nextMacroSwitchTime = new Date(now.getTime() + hours * 3600 * 1000)
+
+      const newState: BourseState = {
+        key: 'macro_state',
+        lastCycleStart: now,
+        startPrice: currentPrice,
+        targetPrice,
+        trendFactor,
+        mode: 'auto',
+        endTime
       }
-
-      if (needNewState) {
-        // 生成新的自动调控状态（一周周期）
-        const durationHours = 7 * 24 // 一周 = 168 小时
-        const fluctuation = 0.30 // 一周内最大30%波动
-        const targetRatio = 1 + (Math.random() * 2 - 1) * fluctuation // 随机涨跌幅
-        const targetPrice = currentPrice * targetRatio
-        const endTime = new Date(now.getTime() + durationHours * 3600 * 1000)
-        
-        // 计算每分钟趋势
-        const minutes = durationHours * 60
-        const trendFactor = (targetPrice - currentPrice) / minutes
-
-        const newState: BourseState = {
-          key: 'macro_state',
-          lastCycleStart: now,
-          startPrice: currentPrice,
-          targetPrice,
-          trendFactor,
-          mode: 'auto',
-          endTime
-        }
-
-        if (!state) {
-          await ctx.database.create('bourse_state', newState)
-        } else {
-          // 排除主键字段，只更新其他字段
-          const { key, ...updateFields } = newState
-          await ctx.database.set('bourse_state', { key: 'macro_state' }, updateFields)
-        }
-        state = newState
+      if (!state) await ctx.database.create('bourse_state', newState)
+      else {
+        const { key, ...updateFields } = newState
+        await ctx.database.set('bourse_state', { key: 'macro_state' }, updateFields)
       }
+      state = newState
+    }
+
+    if (needNewState) {
+      await createAutoState()
+    } else if (state.mode === 'auto' && nextMacroSwitchTime && now >= nextMacroSwitchTime) {
+      // 随机时间刷新宏观目标
+      await createAutoState()
     }
 
     // 检查是否需要随机时间切换K线模型
@@ -656,9 +633,9 @@ export function apply(ctx: Context, config: Config) {
     const elapsed = now.getTime() - state.lastCycleStart.getTime()
     const prevElapsed = elapsed - 2 * 60 * 1000
 
-    // 周波浪参数：一周内约7个波段（每天一个大致方向）
-    const waveCount = 7
-    const weeklyAmplitude = state.startPrice * 0.08 // 周波浪幅度8%
+    // 周波浪参数：随机频率与幅度
+    const waveCount = macroWaveCount
+    const weeklyAmplitude = state.startPrice * macroWeeklyAmplitudeRatio
 
     const getWaveValue = (t: number) => {
         const progress = t / totalDuration
@@ -673,6 +650,13 @@ export function apply(ctx: Context, config: Config) {
     
     let newPrice = currentPrice + trend + volatility + patternDelta + waveDelta
     if (newPrice < 1) newPrice = 1 // 最低价格保护
+
+    // 硬性涨跌幅限制：±50%（日内与周内同时受限）
+    const dayBase = dailyOpenPrice ?? state.startPrice
+    const upperLimit = Math.min(state.startPrice * 1.5, dayBase * 1.5)
+    const lowerLimit = Math.max(state.startPrice * 0.5, dayBase * 0.5)
+    if (newPrice > upperLimit) newPrice = upperLimit
+    if (newPrice < lowerLimit) newPrice = lowerLimit
 
     // 保留两位小数
     newPrice = Number(newPrice.toFixed(2))
@@ -994,13 +978,19 @@ export function apply(ctx: Context, config: Config) {
       
       // 计算趋势
       const minutes = duration * 60
-      const trendFactor = (price - currentPrice) / minutes
+      // 硬性涨跌幅限制（相对周开仓价与当日开盘）：±50%
+      const baseStart = (await ctx.database.get('bourse_state', { key: 'macro_state' }))[0]?.startPrice ?? currentPrice
+      const dayBase = dailyOpenPrice ?? baseStart
+      const upper = Math.min(baseStart * 1.5, dayBase * 1.5)
+      const lower = Math.max(baseStart * 0.5, dayBase * 0.5)
+      const targetPriceClamped = Math.max(lower, Math.min(upper, price))
+      const trendFactor = (targetPriceClamped - currentPrice) / minutes
       
       const newState: BourseState = {
         key: 'macro_state',
         lastCycleStart: now,
         startPrice: currentPrice,
-        targetPrice: price,
+        targetPrice: targetPriceClamped,
         trendFactor,
         mode: 'manual',
         endTime
@@ -1011,11 +1001,13 @@ export function apply(ctx: Context, config: Config) {
       if (existing.length === 0) {
         await ctx.database.create('bourse_state', newState)
       } else {
-        await ctx.database.set('bourse_state', 'macro_state', newState)
+        const { key, ...updateFields } = newState
+        await ctx.database.set('bourse_state', { key: 'macro_state' }, updateFields)
       }
       
       // 立即触发一次更新以应用新状态（可选，这里仅更新状态）
-      return `宏观调控已设置：\n目标价格：${price}\n期限：${duration}小时\n模式：手动干预\n到期后将自动切回随机调控。`
+      const hint = targetPriceClamped !== price ? `（已按±50%限幅从${price}调整为${Number(targetPriceClamped.toFixed(2))}）` : ''
+      return `宏观调控已设置：\n目标价格：${Number(targetPriceClamped.toFixed(2))}${hint}\n期限：${duration}小时\n模式：手动干预\n到期后将自动切回随机调控。`
     })
 
   ctx.command('bourse.admin.market <status>', '设置股市开关状态 (open/close/auto)', { authority: 3 })
@@ -1059,6 +1051,29 @@ export function apply(ctx: Context, config: Config) {
       switchKLinePattern('管理员手动')
       return '已切换K线模型。'
     })
+
+  // // --- 开发测试命令 ---
+  // ctx.command('bourse.test.price [ticks:number]', '开发测试：推进价格更新若干次并返回当前价格', { authority: 3 })
+  //   .action(async ({ session }, ticks?) => {
+  //     const n = typeof ticks === 'number' && ticks > 0 ? Math.min(ticks, 500) : 1
+  //     for (let i = 0; i < n; i++) {
+  //       await updatePrice()
+  //     }
+  //     return `测试完成：推进${n}次；当前价格：${Number(currentPrice.toFixed(2))}`
+  //   })
+
+  // ctx.command('bourse.test.clamp <percent:number>', '开发测试：尝试目标涨跌幅并查看限幅结果', { authority: 3 })
+  //   .action(async ({ session }, percent) => {
+  //     if (typeof percent !== 'number') return '请输入百分比（例如 60 或 -40）'
+  //     const baseStart = (await ctx.database.get('bourse_state', { key: 'macro_state' }))[0]?.startPrice ?? currentPrice
+  //     const dayBase = dailyOpenPrice ?? baseStart
+  //     const upper = Math.min(baseStart * 1.5, dayBase * 1.5)
+  //     const lower = Math.max(baseStart * 0.5, dayBase * 0.5)
+  //     const expected = currentPrice * (1 + percent / 100)
+  //     const clamped = Math.max(lower, Math.min(upper, expected))
+  //     const hint = clamped !== expected ? `（已按±50%限幅从${Number(expected.toFixed(2))}调整为${Number(clamped.toFixed(2))}）` : ''
+  //     return `测试限幅：当前价=${Number(currentPrice.toFixed(2))}；期望=${Number(expected.toFixed(2))}；结果=${Number(clamped.toFixed(2))}${hint}`
+  //   })
 
   // --- 渲染逻辑 ---
 
