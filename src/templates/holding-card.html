@@ -1,50 +1,55 @@
 <html>
+
 <head>
   <style>
     :root {
+      /* 统一配色 (From trade-result) */
       --bg-color: #0c0f15;
-      --card-bg: #151921;
-      --item-bg: #1e232e;
-      --text-primary: #e1e3e6;
-      --text-secondary: #8b919e;
-      --border-color: #232730;
-      --accent-color: #6366f1;
-      --accent-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-      
-      /* 盈亏颜色 - 适配深色底 */
+      --card-bg: #161b22;
+      --item-bg: #1f242e;
+      --text-primary: #f0f3f5;
+      --text-secondary: #8b949e;
+      --border-color: #30363d;
+      --accent-color: #58a6ff;
+
+      /* 兼容变量 & 语义色 */
+      --accent-gradient: linear-gradient(135deg, #58a6ff 0%, #2563eb 100%);
+
       --profit-up: #f87171;
       --profit-down: #4ade80;
       --profit-up-bg: rgba(248, 113, 113, 0.15);
       --profit-down-bg: rgba(74, 222, 128, 0.15);
     }
 
-    body { 
-      margin: 0; 
-      padding: 24px; 
-      font-family: 'Roboto Mono', 'Trebuchet MS', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
-      background-color: var(--bg-color); 
-      width: 480px; 
-      box-sizing: border-box; 
+    body {
+      position: relative;
+      margin: 0;
+      padding: 32px;
+      font-family: 'Roboto Mono', 'Trebuchet MS', 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
+      background-color: var(--bg-color);
+      width: 480px;
+      box-sizing: border-box;
       color: var(--text-primary);
     }
 
-    .card { 
-      background-color: var(--card-bg); 
-      padding: 32px; 
-      border-radius: 24px; 
-      box-shadow: 0 24px 48px rgba(0,0,0,0.5), inset 0 1px 1px rgba(255,255,255,0.05); 
-      border: 1px solid var(--border-color);
+    .card {
+      position: relative;
+      background-color: var(--card-bg);
+      padding: 32px;
+      border-radius: 16px;
+      box-shadow: 0 32px 64px rgba(0, 0, 0, 0.6), 0 0 0 1px var(--border-color);
     }
 
     /* Header */
-    .header { 
-      display: flex; 
-      align-items: center; 
+    .header {
+      display: flex;
+      align-items: center;
       gap: 16px;
-      margin-bottom: 32px; 
+      margin-bottom: 32px;
       padding-bottom: 20px;
       border-bottom: 1px solid var(--border-color);
     }
+
     .avatar {
       width: 56px;
       height: 56px;
@@ -58,13 +63,18 @@
       font-weight: 700;
       box-shadow: 0 8px 16px rgba(99, 102, 241, 0.3);
     }
-    .user-info { flex: 1; }
-    .username { 
-      font-size: 20px; 
-      font-weight: 700; 
-      color: var(--text-primary); 
+
+    .user-info {
+      flex: 1;
+    }
+
+    .username {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--text-primary);
       margin-bottom: 4px;
     }
+
     .account-label {
       font-size: 13px;
       color: var(--text-secondary);
@@ -73,6 +83,7 @@
       align-items: center;
       gap: 6px;
     }
+
     .account-label::before {
       content: '';
       display: block;
@@ -84,11 +95,16 @@
     }
 
     /* Sections */
-    .section { margin-bottom: 28px; }
-    .section:last-child { margin-bottom: 0; }
-    
+    .section {
+      margin-bottom: 36px;
+    }
+
+    .section:last-child {
+      margin-bottom: 0;
+    }
+
     .section-title {
-      font-size: 12px;
+      font-size: 13px;
       font-weight: 600;
       color: var(--text-secondary);
       margin-bottom: 16px;
@@ -98,6 +114,7 @@
       align-items: center;
       gap: 8px;
     }
+
     .section-title::after {
       content: '';
       flex: 1;
@@ -113,14 +130,16 @@
       overflow: hidden;
       border: 1px solid var(--border-color);
     }
+
     .stock-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
       padding: 20px 24px;
-      background: rgba(255,255,255,0.02);
+      background: rgba(255, 255, 255, 0.02);
       border-bottom: 1px solid var(--border-color);
     }
+
     .stock-name {
       font-size: 18px;
       font-weight: 700;
@@ -130,33 +149,49 @@
       gap: 8px;
       letter-spacing: -0.2px;
     }
+
     .stock-amount {
       font-size: 13px;
       font-weight: 600;
-      background: rgba(255,255,255,0.1);
+      background: rgba(255, 255, 255, 0.1);
       color: var(--text-primary);
       padding: 4px 10px;
       border-radius: 6px;
       font-family: 'Roboto Mono', 'Trebuchet MS', monospace;
     }
-    
-    .stock-body { padding: 24px; }
-    
+
+    .stock-body {
+      padding: 24px;
+    }
+
     .stat-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 20px;
     }
-    .stat-item { display: flex; flex-direction: column; gap: 4px; }
-    .stat-label { font-size: 12px; color: var(--text-secondary); }
-    .stat-value { 
-      font-size: 18px; 
-      font-weight: 600; 
-      color: var(--text-primary); 
+
+    .stat-item {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .stat-label {
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    .stat-value {
+      font-size: 18px;
+      font-weight: 450;
+      color: var(--text-primary);
       font-family: 'Roboto Mono', 'Trebuchet MS', monospace;
       letter-spacing: -0.3px;
     }
-    .stat-value.highlight { color: var(--accent-color); }
+
+    .stat-value.highlight {
+      color: var(--accent-color);
+    }
 
     /* Profit Section */
     .profit-section {
@@ -166,11 +201,34 @@
       padding: 16px 24px;
       border-top: 1px solid var(--border-color);
     }
-    .profit-label { font-size: 13px; font-weight: 600; color: var(--text-secondary); }
-    .profit-value { font-size: 18px; font-weight: 700; font-family: 'Roboto Mono', monospace; }
-    .profit-percent { font-size: 13px; font-weight: 600; margin-left: 8px; opacity: 0.9; }
-    .profit-hint { font-size: 12px; font-weight: 400; display: block; margin-top: 4px; opacity: 0.7; }
-    
+
+    .profit-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-secondary);
+    }
+
+    .profit-value {
+      font-size: 20px;
+      font-weight: 700;
+      font-family: 'Roboto Mono';
+    }
+
+    .profit-percent {
+      font-size: 13px;
+      font-weight: 600;
+      margin-left: 8px;
+      opacity: 0.9;
+    }
+
+    .profit-hint {
+      font-size: 15px;
+      font-weight: 400;
+      display: block;
+      margin-top: 4px;
+      opacity: 0.7;
+    }
+
     /* Empty State */
     .empty-state {
       background: var(--item-bg);
@@ -179,62 +237,161 @@
       text-align: center;
       border: 1px dashed var(--border-color);
     }
-    .empty-icon { font-size: 32px; margin-bottom: 12px; opacity: 0.5; }
-    .empty-text { font-size: 14px; color: var(--text-secondary); }
 
-    /* Pending Items */
-    .pending-list { display: flex; flex-direction: column; gap: 12px; }
-    .pending-item {
+    .empty-icon {
+      font-size: 32px;
+      margin-bottom: 12px;
+      opacity: 0.5;
+    }
+
+    .empty-text {
+      font-size: 16px;
+      color: var(--text-secondary);
+    }
+
+    /* Pending Items - Grid Layout */
+    .pending-wrapper {
       display: flex;
-      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .pending-column {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .column-header {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 4px;
+      display: flex;
       align-items: center;
+      gap: 6px;
+    }
+
+    .column-header::before {
+      content: '';
+      display: block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+    }
+
+    .column-header.buy::before {
+      background-color: var(--profit-up);
+      box-shadow: 0 0 8px var(--profit-up);
+    }
+
+    .column-header.sell::before {
+      background-color: var(--profit-down);
+      box-shadow: 0 0 8px var(--profit-down);
+    }
+
+    .pending-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    /* Modern Card Item */
+    .pending-item {
       background: var(--item-bg);
       border-radius: 12px;
-      padding: 16px;
+      padding: 12px;
       border: 1px solid var(--border-color);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
       position: relative;
       overflow: hidden;
     }
-    .pending-item::before {
-      content: '';
-      position: absolute;
-      left: 0; top: 0; bottom: 0;
-      width: 4px;
+
+    /* Top Row */
+    .pi-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
     }
-    .pending-item.buy::before { background-color: var(--profit-up); }
-    .pending-item.sell::before { background-color: var(--profit-down); }
-    
-    .pending-left { display: flex; align-items: center; gap: 12px; }
-    .pending-type {
-      font-size: 11px;
+
+    .pi-badge {
+      font-size: 10px;
       font-weight: 700;
       padding: 2px 6px;
       border-radius: 4px;
       text-transform: uppercase;
     }
-    .pending-type.buy { background: var(--profit-up-bg); color: var(--profit-up); }
-    .pending-type.sell { background: var(--profit-down-bg); color: var(--profit-down); }
-    
-    .pending-amount { font-size: 14px; font-weight: 600; color: var(--text-primary); }
-    
-    .pending-center { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; margin-left: auto; margin-right: 16px; }
-    .pending-price { font-size: 12px; color: var(--text-secondary); }
-    .pending-cost { font-size: 11px; color: var(--text-secondary); opacity: 0.7; }
-    
-    .pending-right { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #eab308; font-weight: 600; }
 
-    /* Footer */
-    .footer {
-      margin-top: 32px;
-      padding-top: 16px;
-      border-top: 1px solid var(--border-color);
-      text-align: center;
-      font-size: 11px;
+    .pi-badge.buy {
+      background: var(--profit-up-bg);
+      color: var(--profit-up);
+    }
+
+    .pi-badge.sell {
+      background: var(--profit-down-bg);
+      color: var(--profit-down);
+    }
+
+    .pi-time {
+      font-size: 13px;
+      color: var(--text-secondary);
+      opacity: 0.8;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    /* Middle Row */
+    .pi-amount {
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--text-primary);
+      font-family: 'Roboto Mono', monospace;
+      letter-spacing: -0.5px;
+    }
+
+    /* Bottom Row */
+    .pi-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      padding-top: 4px;
+      border-top: 1px dashed rgba(255, 255, 255, 0.05);
+    }
+
+    .pi-price {
+      font-size: 14px;
+      color: var(--text-secondary);
+    }
+
+    .pi-cost {
+      font-size: 12px;
       color: var(--text-secondary);
       opacity: 0.6;
     }
+
+    #pending-container {
+      margin-top: 16px;
+    }
+
+    /* Footer */
+    .footer {
+      position: absolute;
+      bottom: 8px;
+      right: 8px;
+      font-size: 11px;
+      color: var(--text-secondary);
+      opacity: 0.6;
+      z-index: 2;
+    }
   </style>
 </head>
+
 <body>
   <div class="card">
     <div class="header">
@@ -274,7 +431,7 @@
       const h = DATA.holding;
       const hasCostData = h.totalCost !== null;
       const isProfit = hasCostData ? h.profit >= 0 : true;
-      
+
       // 适配深色模式的颜色
       const profitColor = isProfit ? '#f87171' : '#4ade80';
       const profitSign = isProfit ? '+' : '';
@@ -348,32 +505,52 @@
     // 渲染待处理交易
     const pendingContainer = document.getElementById('pending-container');
     if (DATA.pending && DATA.pending.length > 0) {
-      const pendingItems = DATA.pending.map(p => `
-        <div class="pending-item ${p.typeClass}">
-          <div class="pending-left">
-            <span class="pending-type ${p.typeClass}">${p.type}</span>
-            <span class="pending-amount">${p.amount} 股</span>
+      const renderItem = (p) => `
+        <div class="pending-item">
+          <div class="pi-header">
+            <span class="pi-badge ${p.typeClass}">${p.type}</span>
+            <span class="pi-time">⏱ ${p.timeLeft}</span>
           </div>
-          <div class="pending-center">
-            <span class="pending-price">@ ${p.price.toFixed(2)}</span>
-            <span class="pending-cost">总 ${p.cost.toFixed(2)}</span>
+          <div class="pi-amount">${p.amount} 股</div>
+          <div class="pi-footer">
+            <span class="pi-price">@ ${p.price.toFixed(2)}</span>
+            <span class="pi-cost">Est. ${p.cost.toFixed(2)}</span>
           </div>
-          <div class="pending-right">
-            <span>⏱</span>
-            <span>${p.timeLeft}</span>
-          </div>
-        </div>
-      `).join('');
+        </div>`;
 
-      pendingContainer.innerHTML = `
-        <div class="section">
-          <div class="section-title">进行中的交易 Pending</div>
-          <div class="pending-list">
-            ${pendingItems}
+      const buys = DATA.pending.filter(p => p.typeClass === 'buy');
+      const sells = DATA.pending.filter(p => p.typeClass === 'sell');
+
+      // Wraps whole pending block in one section, containing a wrapper with columns
+      let html = '<div class="section"><div class="section-title">挂单 Pending</div><div class="pending-wrapper">';
+
+      if (buys.length > 0) {
+        html += `
+          <div class="pending-column">
+            <div class="column-header buy">买入 Buying</div>
+            <div class="pending-list">
+              ${buys.map(renderItem).join('')}
+            </div>
           </div>
-        </div>
-      `;
+        `;
+      }
+
+      if (sells.length > 0) {
+        html += `
+          <div class="pending-column">
+            <div class="column-header sell">卖出 Selling</div>
+            <div class="pending-list">
+              ${sells.map(renderItem).join('')}
+            </div>
+          </div>
+        `;
+      }
+
+      html += '</div></div>';
+
+      pendingContainer.innerHTML = html;
     }
   </script>
 </body>
+
 </html>

@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html>
+
 <head>
   <meta charset="utf-8">
   <style>
@@ -10,28 +11,35 @@
       --text-primary: #f0f3f5;
       --text-secondary: #8b949e;
       --border-color: #30363d;
-      
+
       /* 语义色 */
-      --buy-color: #f87171;   /* 涨/买 */
-      --sell-color: #4ade80; /* 跌/卖 */
+      --buy-color: #f87171;
+      /* 涨/买 */
+      --sell-color: #4ade80;
+      /* 跌/卖 */
       --buy-bg: rgba(248, 113, 113, 0.15);
       --sell-bg: rgba(74, 222, 128, 0.15);
-      
-      --pending-color: #eab308; /* 黄色 */
+
+      --pending-color: #eab308;
+      /* 黄色 */
       --pending-bg: rgba(234, 179, 8, 0.15);
-      
+
       --accent-color: #58a6ff;
     }
 
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
 
-    body { 
+    body {
       /* 修改 3: 增大页面外间距 (32px -> 64px) */
-      padding: 64px; 
-      /* 还原回原本的字体组合 */
-      font-family: 'Roboto Mono', 'Trebuchet MS', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      padding: 64px;
+      /* 统一字体组合 */
+      font-family: 'Roboto Mono', 'Trebuchet MS', 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
       background-color: var(--bg-color);
-      width: 960px; 
+      width: 960px;
       height: 720px;
       color: var(--text-primary);
       display: flex;
@@ -39,13 +47,14 @@
       align-items: center;
     }
 
-    .card { 
-      background-color: var(--card-bg); 
+    .card {
+      background-color: var(--card-bg);
       width: 100%;
       height: 100%;
-      padding: 32px 40px; /* 内部左右间距也稍微增加一点 */
-      border-radius: 16px; 
-      box-shadow: 0 32px 64px rgba(0,0,0,0.6), 0 0 0 1px var(--border-color); 
+      padding: 32px 40px;
+      /* 内部左右间距也稍微增加一点 */
+      border-radius: 16px;
+      box-shadow: 0 32px 64px rgba(0, 0, 0, 0.6), 0 0 0 1px var(--border-color);
       display: flex;
       flex-direction: column;
       position: relative;
@@ -56,7 +65,7 @@
     .top-section {
       display: flex;
       justify-content: space-between;
-      align-items: center; 
+      align-items: center;
       margin-bottom: 24px;
     }
 
@@ -67,7 +76,8 @@
     }
 
     .stock-icon {
-      width: 64px; /* 稍微加大 */
+      width: 64px;
+      /* 稍微加大 */
       height: 64px;
       border-radius: 14px;
       background: linear-gradient(135deg, #2b313a, #1f242e);
@@ -83,11 +93,12 @@
       display: flex;
       flex-direction: column;
       justify-content: center;
-      gap: 8px; 
+      gap: 8px;
     }
 
     .stock-name {
-      font-size: 28px; /* 加大 */
+      font-size: 28px;
+      /* 加大 */
       font-weight: 700;
       line-height: 1.1;
     }
@@ -101,23 +112,35 @@
     .badge {
       display: inline-flex;
       align-items: center;
-      padding: 6px 12px; /* 修改 1: 加大内边距 */
+      padding: 6px 12px;
+      /* 修改 1: 加大内边距 */
       border-radius: 6px;
-      font-size: 14px; /* 修改 1: 增大字号 (13px -> 14px) */
+      font-size: 14px;
+      /* 修改 1: 增大字号 (13px -> 14px) */
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.5px;
       line-height: 1;
     }
 
-    .badge.buy { background: var(--buy-bg); color: var(--buy-color); border: 1px solid rgba(248, 113, 113, 0.2); }
-    .badge.sell { background: var(--sell-bg); color: var(--sell-color); border: 1px solid rgba(74, 222, 128, 0.2); }
-    
-    .badge.pending { 
-      background: var(--pending-bg); 
-      color: var(--pending-color); 
+    .badge.buy {
+      background: var(--buy-bg);
+      color: var(--buy-color);
+      border: 1px solid rgba(248, 113, 113, 0.2);
+    }
+
+    .badge.sell {
+      background: var(--sell-bg);
+      color: var(--sell-color);
+      border: 1px solid rgba(74, 222, 128, 0.2);
+    }
+
+    .badge.pending {
+      background: var(--pending-bg);
+      color: var(--pending-color);
       border: 1px solid rgba(234, 179, 8, 0.2);
     }
+
     .badge.pending::before {
       content: '';
       display: inline-block;
@@ -128,10 +151,19 @@
       margin-right: 6px;
       animation: pulse 2s infinite;
     }
+
     @keyframes pulse {
-      0% { opacity: 1; }
-      50% { opacity: 0.4; }
-      100% { opacity: 1; }
+      0% {
+        opacity: 1;
+      }
+
+      50% {
+        opacity: 0.4;
+      }
+
+      100% {
+        opacity: 1;
+      }
     }
 
     .price-group {
@@ -139,33 +171,43 @@
     }
 
     .main-price {
-      font-size: 56px; /* 加大 */
-      font-weight: 700;
+      font-size: 56px;
+      /* 加大 */
+      font-weight: 500;
       letter-spacing: -2px;
       line-height: 1;
       margin-bottom: 8px;
       /* 修改 2: 强制使用数字字体 */
-      font-family: 'Roboto Mono', monospace; 
+      font-family: 'Roboto Mono';
     }
-    .main-price.buy { color: var(--buy-color); }
-    .main-price.sell { color: var(--sell-color); }
+
+    .main-price.buy {
+      color: var(--buy-color);
+    }
+
+    .main-price.sell {
+      color: var(--sell-color);
+    }
 
     .sub-detail {
-      font-size: 16px; /* 修改 1: 增大字号 (15px -> 16px) */
+      font-size: 16px;
+      /* 修改 1: 增大字号 (15px -> 16px) */
       color: var(--text-secondary);
       display: flex;
       align-items: center;
       justify-content: flex-end;
       gap: 16px;
     }
+
     .sub-detail span {
       display: inline-flex;
       align-items: center;
       gap: 6px;
     }
-    .val-highlight { 
-      color: var(--text-primary); 
-      font-weight: 600; 
+
+    .val-highlight {
+      color: var(--text-primary);
+      font-weight: 600;
       /* 修改 2: 强制使用数字字体 */
       font-family: 'Roboto Mono', monospace;
     }
@@ -175,13 +217,14 @@
       flex: 1;
       width: 100%;
       min-height: 0;
-      margin-bottom: 32px; /* 增加底部间距 */
+      margin-bottom: 32px;
+      /* 增加底部间距 */
       border-radius: 12px;
-      background: rgba(0,0,0,0.2);
+      background: rgba(0, 0, 0, 0.2);
       border: 1px solid var(--border-color);
       position: relative;
     }
-    
+
     canvas {
       display: block;
       width: 100%;
@@ -193,7 +236,8 @@
       display: grid;
       grid-template-columns: 1fr 1fr 1fr;
       gap: 20px;
-      height: 120px; /* 增加高度以容纳更大的字体 */
+      height: 120px;
+      /* 增加高度以容纳更大的字体 */
     }
 
     .stat-item {
@@ -207,12 +251,24 @@
       position: relative;
     }
 
-    .stat-item.highlight { background: rgba(88, 166, 255, 0.05); border-color: rgba(88, 166, 255, 0.2); }
-    .stat-item.profit { background: rgba(248, 113, 113, 0.05); border-color: rgba(248, 113, 113, 0.2); }
-    .stat-item.loss { background: rgba(74, 222, 128, 0.05); border-color: rgba(74, 222, 128, 0.2); }
+    .stat-item.highlight {
+      background: rgba(88, 166, 255, 0.05);
+      border-color: rgba(88, 166, 255, 0.2);
+    }
+
+    .stat-item.profit {
+      background: rgba(248, 113, 113, 0.05);
+      border-color: rgba(248, 113, 113, 0.2);
+    }
+
+    .stat-item.loss {
+      background: rgba(74, 222, 128, 0.05);
+      border-color: rgba(74, 222, 128, 0.2);
+    }
 
     .stat-label {
-      font-size: 14px; /* 修改 1: 增大字号 (13px -> 14px) */
+      font-size: 14px;
+      /* 修改 1: 增大字号 (13px -> 14px) */
       text-transform: uppercase;
       color: var(--text-secondary);
       letter-spacing: 0.5px;
@@ -221,18 +277,25 @@
     }
 
     .stat-value {
-      font-size: 28px; /* 加大 */
+      font-size: 28px;
+      /* 加大 */
       font-weight: 700;
       color: var(--text-primary);
       /* 修改 2: 强制使用数字字体 */
       font-family: 'Roboto Mono', monospace;
     }
-    
-    .stat-value.profit { color: var(--buy-color); }
-    .stat-value.loss { color: var(--sell-color); }
+
+    .stat-value.profit {
+      color: var(--buy-color);
+    }
+
+    .stat-value.loss {
+      color: var(--sell-color);
+    }
 
     .stat-sub {
-      font-size: 14px; /* 修改 1: 增大字号 */
+      font-size: 14px;
+      /* 修改 1: 增大字号 */
       color: var(--text-secondary);
       opacity: 0.8;
       margin-top: 6px;
@@ -249,17 +312,18 @@
       gap: 16px;
       align-items: center;
     }
-    
+
     .time-tag {
       font-size: 12px;
       color: var(--text-secondary);
       padding: 6px 8px;
       border-radius: 6px;
-      font-family: 'Roboto Mono', sans-serif; /* 包含时间数字 */
+      font-family: 'Roboto Mono', sans-serif;
+      /* 包含时间数字 */
     }
-
   </style>
 </head>
+
 <body>
   <div class="card">
     <!-- 顶部信息栏 -->
@@ -272,13 +336,13 @@
           <div class="badges-container" id="badges-container"></div>
         </div>
       </div>
-      
+
       <div class="price-group">
-        <div class="main-price" id="trade-price">--</div>
+        <div class="main-price" id="trade-price"></div>
         <div class="sub-detail">
-          <span>数量 <b class="val-highlight" id="trade-amount">--</b></span>
+          <span>数量 <b class="val-highlight" id="trade-amount"></b></span>
           <span style="opacity: 0.2">|</span>
-          <span>总额 <b class="val-highlight" id="trade-total">--</b></span>
+          <span>总额 <b class="val-highlight" id="trade-total"></b></span>
         </div>
       </div>
     </div>
@@ -324,7 +388,7 @@
       tradeIndex: 7
     };
     */
-    
+
     let DATA;
     try {
       DATA = JSON.parse(document.getElementById('data-source').textContent);
@@ -335,7 +399,7 @@
     const isBuy = DATA.tradeType === 'buy';
     const status = DATA.status || 'settled';
     const isPending = status === 'pending';
-    
+
     const colors = {
       buy: '#f87171',
       sell: '#4ade80',
@@ -344,7 +408,7 @@
       text: '#f0f3f5',
       textDim: '#8b949e'
     };
-    
+
     const mainColor = isBuy ? colors.buy : colors.sell;
 
     // --- 1. 渲染顶部基本信息 ---
@@ -369,8 +433,8 @@
     if (isPending) {
       const pendingBadge = document.createElement('div');
       pendingBadge.className = 'badge pending';
-      const pendingText = DATA.pendingEndTime 
-        ? `PENDING 预计 ${DATA.pendingEndTime} 完成` 
+      const pendingText = DATA.pendingEndTime
+        ? `PENDING 预计 ${DATA.pendingEndTime} 完成`
         : 'PENDING 挂单处理中';
       pendingBadge.innerHTML = pendingText;
       badgesContainer.appendChild(pendingBadge);
@@ -427,27 +491,27 @@
     const canvas = document.getElementById('chart');
     const rect = container.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 2;
-    
+
     canvas.width = rect.width * dpr;
     canvas.height = rect.height * dpr;
-    
+
     const ctx = canvas.getContext('2d');
     ctx.scale(dpr, dpr);
-    
+
     const W = rect.width;
     const H = rect.height;
-    const pad = { top: 30, bottom: 30, left: 10, right: 60 }; 
+    const pad = { top: 30, bottom: 30, left: 10, right: 60 };
 
     if (DATA.prices && DATA.prices.length > 0) {
       const prices = DATA.prices;
       const minP = Math.min(...prices);
       const maxP = Math.max(...prices);
       const rangeP = maxP - minP || 1;
-      
+
       const yMin = minP - rangeP * 0.2;
       const yMax = maxP + rangeP * 0.2;
       const yRange = yMax - yMin;
-      
+
       const stepX = (W - pad.left - pad.right) / (prices.length - 1);
 
       const getX = i => pad.left + i * stepX;
@@ -463,25 +527,25 @@
         ctx.moveTo(pad.left, y);
         ctx.lineTo(W - pad.right, y);
         ctx.stroke();
-        
+
         // 价格标签 (字体也同步调整为 Roboto Mono 且加大)
         const val = yMin + (i / gridLines) * yRange;
         ctx.fillStyle = colors.textDim;
         // 修改 1 & 2: 增大字号到 14px 并使用 Roboto Mono
-        ctx.font = '500 14px "Roboto Mono", monospace'; 
+        ctx.font = '500 14px "Roboto Mono", monospace';
         ctx.textAlign = 'left';
         ctx.fillText(val.toFixed(2), W - pad.right + 8, y + 4);
       }
 
       // (B) 绘制面积图
       const points = prices.map((p, i) => ({ x: getX(i), y: getY(p) }));
-      
+
       ctx.beginPath();
       ctx.moveTo(points[0].x, H - pad.bottom);
       points.forEach(p => ctx.lineTo(p.x, p.y));
-      ctx.lineTo(points[points.length-1].x, H - pad.bottom);
+      ctx.lineTo(points[points.length - 1].x, H - pad.bottom);
       ctx.closePath();
-      
+
       const gradient = ctx.createLinearGradient(0, pad.top, 0, H - pad.bottom);
       gradient.addColorStop(0, isBuy ? 'rgba(248, 113, 113, 0.25)' : 'rgba(74, 222, 128, 0.25)');
       gradient.addColorStop(1, 'rgba(0,0,0,0)');
@@ -496,8 +560,8 @@
         const yc = (points[i].y + points[i + 1].y) / 2;
         ctx.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
       }
-      ctx.lineTo(points[points.length-1].x, points[points.length-1].y);
-      
+      ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
+
       ctx.strokeStyle = mainColor;
       ctx.lineWidth = 2.5;
       ctx.lineCap = 'round';
@@ -532,7 +596,7 @@
       // 价格标签 Tag (同步字体和大小)
       const tagText = DATA.tradePrice.toFixed(2);
       // 修改 1 & 2: 增大字号到 14px 并使用 Roboto Mono
-      ctx.font = 'bold 14px "Roboto Mono", monospace'; 
+      ctx.font = 'bold 14px "Roboto Mono", monospace';
       const tm = ctx.measureText(tagText);
       const tagW = tm.width + 16;
       const tagH = 26; // 稍微增加高度适应大字号
@@ -557,4 +621,5 @@
 
   </script>
 </body>
+
 </html>

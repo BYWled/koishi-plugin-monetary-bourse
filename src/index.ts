@@ -245,7 +245,8 @@ export function apply(ctx: Context, config: Config) {
    * monetary 表结构：{ uid: number, currency: string, value: number }
    */
   async function getCashBalance(uid: number, currency: string): Promise<number> {
-    if (!uid || typeof uid !== 'number' || Number.isNaN(uid)) {
+    // 注意：uid=0 是有效值，只检查类型和 NaN
+    if (uid === undefined || uid === null || typeof uid !== 'number' || Number.isNaN(uid)) {
       logger.warn(`getCashBalance: 无效的uid: ${uid}`)
       return 0
     }
@@ -270,7 +271,8 @@ export function apply(ctx: Context, config: Config) {
    * 修改现金余额
    */
   async function changeCashBalance(uid: number, currency: string, delta: number): Promise<boolean> {
-    if (!uid || typeof uid !== 'number' || Number.isNaN(uid)) {
+    // 注意：uid=0 是有效值，只检查类型和 NaN
+    if (uid === undefined || uid === null || typeof uid !== 'number' || Number.isNaN(uid)) {
       logger.warn(`changeCashBalance: 无效的uid: ${uid}`)
       return false
     }
@@ -316,7 +318,8 @@ export function apply(ctx: Context, config: Config) {
    * 获取银行活期余额（直接查询 monetary_bank_int 表）
    */
   async function getBankDemandBalance(uid: number, currency: string): Promise<number> {
-    if (!uid || typeof uid !== 'number' || Number.isNaN(uid)) return 0
+    // 注意：uid=0 是有效值，只检查类型和 NaN
+    if (uid === undefined || uid === null || typeof uid !== 'number' || Number.isNaN(uid)) return 0
 
     try {
       // 检查表是否存在
@@ -344,7 +347,8 @@ export function apply(ctx: Context, config: Config) {
    * 从银行活期扣款
    */
   async function deductBankDemand(uid: number, currency: string, amount: number): Promise<boolean> {
-    if (!uid || typeof uid !== 'number' || Number.isNaN(uid) || amount <= 0) return false
+    // 注意：uid=0 是有效值，只检查类型和 NaN
+    if (uid === undefined || uid === null || typeof uid !== 'number' || Number.isNaN(uid) || amount <= 0) return false
 
     try {
       const tables = ctx.database.tables
@@ -973,8 +977,8 @@ export function apply(ctx: Context, config: Config) {
         }
       } else if (txn.type === 'sell') {
         // 卖出解冻：增加现金
-        // 使用存储的数字uid
-        if (txn.uid && typeof txn.uid === 'number') {
+        // 使用存储的数字uid（注意：uid=0 是有效值）
+        if (txn.uid !== undefined && txn.uid !== null && typeof txn.uid === 'number' && !Number.isNaN(txn.uid)) {
           // 保留两位小数
           const amount = Number(txn.cost.toFixed(2))
           const success = await changeCashBalance(txn.uid, config.currency, amount)
@@ -1092,20 +1096,15 @@ export function apply(ctx: Context, config: Config) {
       const visibleUserId = session.userId // 用于持仓记录
 
       // 必须先检查 session.user 存在性，避免可选链导致 uid 为 undefined/null
-      if (!session.user || session.user.id == null) {
+      if (!session.user || session.user.id === undefined || session.user.id === null) {
         logger.error(`stock.buy: session.user 不存在或 id 为空 user=${session.userId}`)
         return '无法获取用户ID，请稍后重试。'
       }
 
-      let uid = session.user.id
+      const uid = session.user.id
       if (typeof uid !== 'number') {
-        // 尝试转一次数字，再验证
-        const parsedUid = Number(uid)
-        if (!parsedUid || isNaN(parsedUid)) {
-          logger.error(`stock.buy: 无法获取数字UID user=${session.userId}, rawId=${uid}`)
-          return '无法获取用户ID，请稍后重试。'
-        }
-        uid = parsedUid
+        logger.error(`stock.buy: 无法获取数字UID user=${session.userId}, rawId=${uid}`)
+        return '无法获取用户ID，请稍后重试。'
       }
 
       const cost = Number((currentPrice * amount).toFixed(2))
@@ -1128,13 +1127,13 @@ export function apply(ctx: Context, config: Config) {
       }
       const freezeMs = freezeMinutes * 60 * 1000
 
-      // 检查用户是否有其他挂单，如果有则排队（由前往后依次读秒）
-      const userPendingOrders = await ctx.database.get('bourse_pending', { userId: visibleUserId }, { sort: { endTime: 'desc' }, limit: 1 })
+      // 检查用户是否有其他买入挂单，如果有则排队（买入和卖出分开计时）
+      const userPendingOrders = await ctx.database.get('bourse_pending', { userId: visibleUserId, type: 'buy' }, { sort: { endTime: 'desc' }, limit: 1 })
       let startTime = new Date()
       if (userPendingOrders.length > 0) {
         const lastOrderEndTime = userPendingOrders[0].endTime
         if (lastOrderEndTime > startTime) {
-          startTime = lastOrderEndTime // 新挂单从上一个挂单结束后开始计时
+          startTime = lastOrderEndTime // 新买入挂单从上一个买入挂单结束后开始计时
         }
       }
       const endTime = new Date(startTime.getTime() + freezeMs)
@@ -1209,20 +1208,15 @@ export function apply(ctx: Context, config: Config) {
       const visibleUserId = session.userId
 
       // 必须先检查 session.user 存在性，避免可选链导致 uid 为 undefined/null
-      if (!session.user || session.user.id == null) {
+      if (!session.user || session.user.id === undefined || session.user.id === null) {
         logger.error(`stock.sell: session.user 不存在或 id 为空 user=${session.userId}`)
         return '无法获取用户ID，请稍后重试。'
       }
 
-      let uid = session.user.id
+      const uid = session.user.id
       if (typeof uid !== 'number') {
-        // 尝试转一次数字，再验证
-        const parsedUid = Number(uid)
-        if (!parsedUid || isNaN(parsedUid)) {
-          logger.error(`stock.sell: 无法获取数字UID user=${session.userId}, rawId=${uid}`)
-          return '无法获取用户ID，请稍后重试。'
-        }
-        uid = parsedUid
+        logger.error(`stock.buy: 无法获取数字UID user=${session.userId}, rawId=${uid}`)
+        return '无法获取用户ID，请稍后重试。'
       }
 
       const holding = await ctx.database.get('bourse_holding', { userId: visibleUserId, stockId })
@@ -1270,13 +1264,13 @@ export function apply(ctx: Context, config: Config) {
       }
       const freezeMs = freezeMinutes * 60 * 1000
 
-      // 检查用户是否有其他挂单，如果有则排队（由前往后依次读秒）
-      const userPendingOrders = await ctx.database.get('bourse_pending', { userId: visibleUserId }, { sort: { endTime: 'desc' }, limit: 1 })
+      // 检查用户是否有其他卖出挂单，如果有则排队（买入和卖出分开计时）
+      const userPendingOrders = await ctx.database.get('bourse_pending', { userId: visibleUserId, type: 'sell' }, { sort: { endTime: 'desc' }, limit: 1 })
       let startTime = new Date()
       if (userPendingOrders.length > 0) {
         const lastOrderEndTime = userPendingOrders[0].endTime
         if (lastOrderEndTime > startTime) {
-          startTime = lastOrderEndTime // 新挂单从上一个挂单结束后开始计时
+          startTime = lastOrderEndTime // 新卖出挂单从上一个卖出挂单结束后开始计时
         }
       }
       const endTime = new Date(startTime.getTime() + freezeMs)
@@ -1349,7 +1343,14 @@ export function apply(ctx: Context, config: Config) {
     })
 
   ctx.command('stock.my', '我的持仓')
+    .userFields(['id'])
     .action(async ({ session }) => {
+      // 检查 session.user 存在性，确保支持 uid=0
+      if (!session.user || session.user.id === undefined || session.user.id === null) {
+        logger.error(`stock.my: session.user 不存在或 id 为空 user=${session.userId}`)
+        return '无法获取用户ID，请稍后重试。'
+      }
+
       const userId = session.userId
       const holdings = await ctx.database.get('bourse_holding', { userId })
       const pending = await ctx.database.get('bourse_pending', { userId })
