@@ -1008,6 +1008,7 @@ export function apply(ctx: Context, config: Config) {
   // --- 命令定义 ---
 
   ctx.command('stock [interval:string]', '查看股市行情')
+    .userFields(['id'])  // 添加 userFields 确保 session.user 在转发子命令前已加载
     .action(async ({ session }, interval) => {
       // 修复：如果 interval 是子指令关键字，则手动转发（防止被当做参数捕获）
       if (['buy', 'sell', 'my'].includes(interval)) {
@@ -1088,14 +1089,20 @@ export function apply(ctx: Context, config: Config) {
       if (!await isMarketOpen()) return '休市中，无法交易。'
 
       // 使用 session.user.id 获取数字类型的用户ID
-      let uid = session.user?.id
       const visibleUserId = session.userId // 用于持仓记录
 
-      if (!uid || typeof uid !== 'number') {
+      // 必须先检查 session.user 存在性，避免可选链导致 uid 为 undefined/null
+      if (!session.user || session.user.id == null) {
+        logger.error(`stock.buy: session.user 不存在或 id 为空 user=${session.userId}`)
+        return '无法获取用户ID，请稍后重试。'
+      }
+
+      let uid = session.user.id
+      if (typeof uid !== 'number') {
         // 尝试转一次数字，再验证
         const parsedUid = Number(uid)
-        if (isNaN(parsedUid)) {
-          logger.error(`stock.buy: 无法获取数字UID user=${session.userId}`)
+        if (!parsedUid || isNaN(parsedUid)) {
+          logger.error(`stock.buy: 无法获取数字UID user=${session.userId}, rawId=${uid}`)
           return '无法获取用户ID，请稍后重试。'
         }
         uid = parsedUid
@@ -1199,14 +1206,20 @@ export function apply(ctx: Context, config: Config) {
       }
       if (!await isMarketOpen()) return '休市中，无法交易。'
 
-      let uid = session.user?.id
       const visibleUserId = session.userId
 
-      if (!uid || typeof uid !== 'number') {
+      // 必须先检查 session.user 存在性，避免可选链导致 uid 为 undefined/null
+      if (!session.user || session.user.id == null) {
+        logger.error(`stock.sell: session.user 不存在或 id 为空 user=${session.userId}`)
+        return '无法获取用户ID，请稍后重试。'
+      }
+
+      let uid = session.user.id
+      if (typeof uid !== 'number') {
         // 尝试转一次数字，再验证
         const parsedUid = Number(uid)
-        if (isNaN(parsedUid)) {
-          logger.error(`stock.sell: 无法获取数字UID user=${session.userId}`)
+        if (!parsedUid || isNaN(parsedUid)) {
+          logger.error(`stock.sell: 无法获取数字UID user=${session.userId}, rawId=${uid}`)
           return '无法获取用户ID，请稍后重试。'
         }
         uid = parsedUid
