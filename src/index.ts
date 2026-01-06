@@ -1,8 +1,8 @@
 ﻿import { Context, Schema, h, Time, Logger } from 'koishi'
 import { resolve } from 'path'
 import { promises as fs } from 'fs'
-import {} from 'koishi-plugin-monetary'
-import {} from 'koishi-plugin-puppeteer'
+import { } from 'koishi-plugin-monetary'
+import { } from 'koishi-plugin-puppeteer'
 
 export const name = 'monetary-bourse'
 // 注入依赖：monetary(可选，用于兼容), database(必须), puppeteer(必须)
@@ -109,7 +109,7 @@ export const Config: Schema<Config> = Schema.intersect([
     initialPrice: Schema.number().min(0.01).default(1200).description('股票初始价格'),
     maxHoldings: Schema.number().min(1).step(1).default(100000).description('单人最大持仓限制'),
   }).description('基础设置'),
-  
+
   Schema.object({
     marketStatus: Schema.union(['open', 'close', 'auto']).default('auto').description('股市开关状态：open=强制开启，close=强制关闭，auto=按时间自动'),
   }).description('股市开关'),
@@ -197,14 +197,14 @@ export function apply(ctx: Context, config: Config) {
   // 市场定时任务（每 2 分钟运行一次）
   ctx.setInterval(async () => {
     const isOpen = await isMarketOpen()
-    
+
     // 检测开市事件：从关闭变为开启
     if (isOpen && !wasMarketOpen) {
       // 开市了，记录当日开盘价（用于日内限制）
       dailyOpenPrice = currentPrice
     }
     wasMarketOpen = isOpen
-    
+
     if (!isOpen) return
     await updatePrice()
     await processPendingTransactions()
@@ -231,7 +231,7 @@ export function apply(ctx: Context, config: Config) {
     const now = new Date()
     const day = now.getDay()
     const hour = now.getHours()
-    
+
     // 0 是周日, 6 是周六
     if (day === 0 || day === 6) return false
     if (hour < config.openHour || hour >= config.closeHour) return false
@@ -254,7 +254,7 @@ export function apply(ctx: Context, config: Config) {
       // @ts-ignore - monetary 表由 koishi-plugin-monetary 插件定义
       const records = await ctx.database.get('monetary', { uid, currency })
       logger.info(`getCashBalance: uid=${uid}, currency=${currency}, records=${JSON.stringify(records)}`)
-      
+
       if (records && records.length > 0) {
         const value = Number(records[0].value || 0)
         return Number.isNaN(value) ? 0 : value
@@ -278,7 +278,7 @@ export function apply(ctx: Context, config: Config) {
     try {
       // @ts-ignore
       const records = await ctx.database.get('monetary', { uid, currency })
-      
+
       if (!records || records.length === 0) {
         // 记录不存在，尝试创建
         if (delta < 0) return false // 无法扣款
@@ -296,7 +296,7 @@ export function apply(ctx: Context, config: Config) {
       const current = Number(records[0].value || 0)
       // 保留两位小数，避免浮点数精度丢失
       const newValue = Number((current + delta).toFixed(2))
-      
+
       if (newValue < 0) {
         logger.warn(`changeCashBalance: 余额不足 current=${current}, delta=${delta}`)
         return false
@@ -328,7 +328,7 @@ export function apply(ctx: Context, config: Config) {
 
       const records = await ctx.database.get('monetary_bank_int', { uid, currency, type: 'demand' })
       logger.info(`getBankDemandBalance: uid=${uid}, currency=${currency}, records=${records.length}`)
-      
+
       let total = 0
       for (const record of records) {
         total += Number(record.amount || 0)
@@ -384,23 +384,28 @@ export function apply(ctx: Context, config: Config) {
    */
   async function pay(uid: number, cost: number, currency: string): Promise<{ success: boolean; msg?: string }> {
     logger.info(`pay: uid=${uid}, cost=${cost}, currency=${currency}`)
-    
+
     const cash = await getCashBalance(uid, currency)
     const bankDemand = await getBankDemandBalance(uid, currency)
 
     logger.info(`pay: 现金=${cash}, 活期=${bankDemand}, 需要=${cost}`)
 
     if (cash + bankDemand < cost) {
-      return { success: false, msg: `资金不足！需要 ${cost.toFixed(2)}，当前现金 ${cash.toFixed(2)} + 活期 ${bankDemand.toFixed(2)}` }
+      const msg = `资金不足！需要 ${cost.toFixed(2)}，当前现金 ${cash.toFixed(2)} + 活期 ${bankDemand.toFixed(2)}`
+      logger.warn(`pay 失败: ${msg}, uid=${uid}`)
+      return { success: false, msg }
     }
 
     let remainingCost = Number(cost.toFixed(2))
-    
+
     // 1. 扣除现金
     const cashDeduct = Number(Math.min(cash, remainingCost).toFixed(2))
     if (cashDeduct > 0) {
       const success = await changeCashBalance(uid, currency, -cashDeduct)
-      if (!success) return { success: false, msg: '扣除现金失败，请重试' }
+      if (!success) {
+        logger.error(`pay 失败: 扣除现金失败 uid=${uid}, cost=${cashDeduct}`)
+        return { success: false, msg: '扣除现金失败，请重试' }
+      }
       remainingCost = Number((remainingCost - cashDeduct).toFixed(2))
     }
 
@@ -408,6 +413,7 @@ export function apply(ctx: Context, config: Config) {
     if (remainingCost > 0) {
       const success = await deductBankDemand(uid, currency, remainingCost)
       if (!success) {
+        logger.error(`pay 失败: 银行活期扣款失败 uid=${uid}, cost=${remainingCost}`)
         // 回滚现金扣除
         if (cashDeduct > 0) await changeCashBalance(uid, currency, cashDeduct)
         return { success: false, msg: '银行活期扣款失败' }
@@ -780,7 +786,7 @@ export function apply(ctx: Context, config: Config) {
     if (state) {
       if (!state.lastCycleStart) state.lastCycleStart = new Date(Date.now() - 7 * 24 * 3600 * 1000)
       if (!(state.lastCycleStart instanceof Date)) state.lastCycleStart = new Date(state.lastCycleStart)
-      
+
       if (!state.endTime) state.endTime = new Date(state.lastCycleStart.getTime() + 7 * 24 * 3600 * 1000)
       if (!(state.endTime instanceof Date)) state.endTime = new Date(state.endTime)
     }
@@ -799,10 +805,10 @@ export function apply(ctx: Context, config: Config) {
       const fluctuation = 0.25 // 周目标波动范围±25%
       const targetRatio = 1 + (Math.random() * 2 - 1) * fluctuation
       let targetPrice = currentPrice * targetRatio
-      
+
       // 限幅
       targetPrice = Math.max(currentPrice * 0.5, Math.min(currentPrice * 1.5, targetPrice))
-      
+
       const endTime = new Date(now.getTime() + durationHours * 3600 * 1000)
 
       const newState: BourseState = {
@@ -857,11 +863,11 @@ export function apply(ctx: Context, config: Config) {
       logger.warn(`updatePrice: 未知的K线模型 ${currentPattern}`)
       return
     }
-    
+
     const patternValue = pattern.fn(patternProgress)
     const prevPatternValue = pattern.fn(Math.max(0, patternProgress - 0.02))
     const patternDelta = (patternValue - prevPatternValue)
-    
+
     const deviation = (targetPrice - currentPrice) / currentPrice
     const deviationMultiplier = 1 + Math.abs(deviation) * 2
     const patternReturn = patternDelta * 0.15 * deviationMultiplier
@@ -881,7 +887,7 @@ export function apply(ctx: Context, config: Config) {
     const u1 = Math.random()
     const u2 = Math.random()
     const normalRandom = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2)
-    
+
     const dayStart = new Date(now)
     dayStart.setHours(config.openHour, 0, 0, 0)
     const dayEnd = new Date(now)
@@ -889,12 +895,12 @@ export function apply(ctx: Context, config: Config) {
     const dayDuration = dayEnd.getTime() - dayStart.getTime()
     const dayElapsed = now.getTime() - dayStart.getTime()
     const dayProgress = Math.max(0, Math.min(1, dayElapsed / dayDuration))
-    
+
     const morningVol = Math.exp(-8 * dayProgress)
     const afternoonVol = Math.exp(-8 * (1 - dayProgress))
     const volatility = 0.3 + morningVol * 0.5 + afternoonVol * 0.4
     // 提升随机扰动强度，让实时曲线更有呼吸感
-    const randomReturn = normalRandom * 0.0035 * volatility
+    const randomReturn = normalRandom * 0.0065 * volatility
 
     // ============================================================
     // 4. 合成总收益率
@@ -905,16 +911,16 @@ export function apply(ctx: Context, config: Config) {
     // 5. 计算新价格并应用限幅
     // ============================================================
     let newPrice = currentPrice * (1 + totalReturn)
-    
+
     const dayBase = dailyOpenPrice ?? basePrice
     const weekUpper = basePrice * 1.5
     const weekLower = basePrice * 0.5
     const dayUpper = dayBase * 1.3
     const dayLower = dayBase * 0.7
-    
+
     const upperLimit = Math.min(weekUpper, dayUpper)
     const lowerLimit = Math.max(weekLower, dayLower)
-    
+
     if (newPrice > upperLimit * 0.95) {
       const overshoot = (newPrice - upperLimit * 0.95) / (upperLimit * 0.05)
       newPrice = upperLimit * 0.95 + (upperLimit * 0.05) * Math.tanh(overshoot)
@@ -923,10 +929,10 @@ export function apply(ctx: Context, config: Config) {
       const undershoot = (lowerLimit * 1.05 - newPrice) / (lowerLimit * 0.05)
       newPrice = lowerLimit * 1.05 - (lowerLimit * 0.05) * Math.tanh(undershoot)
     }
-    
+
     newPrice = Math.max(lowerLimit, Math.min(upperLimit, newPrice))
     if (newPrice < 1) newPrice = 1
-    
+
     newPrice = Number(newPrice.toFixed(2))
     currentPrice = newPrice
     await ctx.database.create('bourse_history', { stockId, price: newPrice, time: new Date() })
@@ -943,9 +949,9 @@ export function apply(ctx: Context, config: Config) {
         // 买入解冻：增加持仓和总成本
         const holding = await ctx.database.get('bourse_holding', { userId: txn.userId, stockId })
         if (holding.length === 0) {
-          await ctx.database.create('bourse_holding', { 
-            userId: txn.userId, 
-            stockId, 
+          await ctx.database.create('bourse_holding', {
+            userId: txn.userId,
+            stockId,
             amount: txn.amount,
             totalCost: Number(txn.cost.toFixed(2))
           })
@@ -960,7 +966,7 @@ export function apply(ctx: Context, config: Config) {
             logger.info(`processPendingTransactions: 旧持仓无成本记录，使用交易价格估算: ${holding[0].amount}股 * ${txn.price} = ${existingCost}`)
           }
           const newTotalCost = Number((existingCost + txn.cost).toFixed(2))
-          await ctx.database.set('bourse_holding', { userId: txn.userId, stockId }, { 
+          await ctx.database.set('bourse_holding', { userId: txn.userId, stockId }, {
             amount: holding[0].amount + txn.amount,
             totalCost: newTotalCost
           })
@@ -971,9 +977,12 @@ export function apply(ctx: Context, config: Config) {
         if (txn.uid && typeof txn.uid === 'number') {
           // 保留两位小数
           const amount = Number(txn.cost.toFixed(2))
-          await changeCashBalance(txn.uid, config.currency, amount)
+          const success = await changeCashBalance(txn.uid, config.currency, amount)
+          if (!success) {
+            logger.error(`processPendingTransactions 失败: 卖出结算充值失败 txn.id=${txn.id}, uid=${txn.uid}, amount=${amount}`)
+          }
         } else {
-          logger.warn(`processPendingTransactions: 卖出订单缺少有效uid, txn.id=${txn.id}`)
+          logger.warn(`processPendingTransactions 警告: 卖出订单缺少有效uid, txn.id=${txn.id}`)
         }
       }
       await ctx.database.remove('bourse_pending', { id: txn.id })
@@ -982,11 +991,11 @@ export function apply(ctx: Context, config: Config) {
 
   // 统一获取价格历史，便于渲染成交/挂单回单
   async function getPriceHistory(limit = 100) {
-    const historyData = await ctx.database.get('bourse_history', { 
-      stockId 
-    }, { 
-      sort: { time: 'desc' }, 
-      limit 
+    const historyData = await ctx.database.get('bourse_history', {
+      stockId
+    }, {
+      sort: { time: 'desc' },
+      limit
     })
 
     return historyData.reverse().map(h => ({
@@ -1008,60 +1017,63 @@ export function apply(ctx: Context, config: Config) {
       }
 
       if (!await isMarketOpen()) return '股市目前休市中。（开放时间：工作日 ' + config.openHour + ':00 - ' + config.closeHour + ':00）'
-      
+
       let history: BourseHistory[]
       const now = new Date()
-      
+
       if (interval === 'day') {
         const startTime = new Date(now.getTime() - 24 * 3600 * 1000)
-        history = await ctx.database.get('bourse_history', { 
-          stockId, 
-          time: { $gte: startTime } 
+        history = await ctx.database.get('bourse_history', {
+          stockId,
+          time: { $gte: startTime }
         }, { sort: { time: 'asc' } })
       } else if (interval === 'week') {
         const startTime = new Date(now.getTime() - 7 * 24 * 3600 * 1000)
-        history = await ctx.database.get('bourse_history', { 
-          stockId, 
-          time: { $gte: startTime } 
+        history = await ctx.database.get('bourse_history', {
+          stockId,
+          time: { $gte: startTime }
         }, { sort: { time: 'asc' } })
       } else {
         // 默认实时（最近100条）
-        history = await ctx.database.get('bourse_history', { stockId }, { 
-          limit: 100, 
-          sort: { time: 'desc' } 
+        history = await ctx.database.get('bourse_history', { stockId }, {
+          limit: 100,
+          sort: { time: 'desc' }
         })
         history = history.reverse()
       }
-      
-      if (history.length === 0) return '暂无行情数据。'
-      
+
+      if (history.length === 0) {
+        logger.warn(`stock: 数据库中未找到 ${stockId} 的行情数据`)
+        return '暂无行情数据。'
+      }
+
       // 数据采样（如果数据量过大）
       if (history.length > 300) {
         const step = Math.ceil(history.length / 300)
         history = history.filter((_, index) => index % step === 0)
       }
-      
+
       const latest = history[history.length - 1]
-      
+
       // Adjust time format for chart
       const formattedData = history.map(h => {
-         let timeStr = h.time.toLocaleTimeString()
-         if (interval === 'week' || interval === 'day') {
-             // For longer durations, include Month/Day
-             timeStr = `${h.time.getMonth()+1}-${h.time.getDate()} ${h.time.getHours()}:${h.time.getMinutes().toString().padStart(2, '0')}`
-         }
-         return {
-             time: timeStr,
-             price: h.price,
-             timestamp: h.time.getTime()
-         }
+        let timeStr = h.time.toLocaleTimeString()
+        if (interval === 'week' || interval === 'day') {
+          // For longer durations, include Month/Day
+          timeStr = `${h.time.getMonth() + 1}-${h.time.getDate()} ${h.time.getHours()}:${h.time.getMinutes().toString().padStart(2, '0')}`
+        }
+        return {
+          time: timeStr,
+          price: h.price,
+          timestamp: h.time.getTime()
+        }
       })
-      
+
       const high = Math.max(...formattedData.map(d => d.price))
       const low = Math.min(...formattedData.map(d => d.price))
-      
+
       const viewLabel = interval === 'week' ? '周走势' : interval === 'day' ? '日走势' : '实时走势'
-      
+
       const img = await renderStockImage(ctx, formattedData, config.stockName, viewLabel, latest.price, high, low)
       return img
     })
@@ -1069,22 +1081,32 @@ export function apply(ctx: Context, config: Config) {
   ctx.command('stock.buy <amount:number>', '买入股票')
     .userFields(['id'])
     .action(async ({ session }, amount) => {
-      if (!amount || amount <= 0 || !Number.isInteger(amount)) return '请输入有效的购买股数（整数）。'
+      if (!amount || amount <= 0 || !Number.isInteger(amount)) {
+        logger.warn(`stock.buy: 非法买入数量 user=${session.userId}, amount=${amount}`)
+        return '请输入有效的购买股数（整数）。'
+      }
       if (!await isMarketOpen()) return '休市中，无法交易。'
 
       // 使用 session.user.id 获取数字类型的用户ID
-      const uid = session.user?.id
+      let uid = session.user?.id
       const visibleUserId = session.userId // 用于持仓记录
-      
+
       if (!uid || typeof uid !== 'number') {
-        return '无法获取用户ID，请稍后重试。'
+        // 尝试转一次数字，再验证
+        const parsedUid = Number(uid)
+        if (isNaN(parsedUid)) {
+          logger.error(`stock.buy: 无法获取数字UID user=${session.userId}`)
+          return '无法获取用户ID，请稍后重试。'
+        }
+        uid = parsedUid
       }
 
       const cost = Number((currentPrice * amount).toFixed(2))
-      
+
       // 支付流程：现金 + 银行活期
       const payResult = await pay(uid, cost, config.currency)
       if (!payResult.success) {
+        logger.warn(`stock.buy: 支付失败 user=${session.userId}, amount=${amount}, cost=${cost}, reason=${payResult.msg}`)
         return payResult.msg
       }
 
@@ -1098,7 +1120,7 @@ export function apply(ctx: Context, config: Config) {
         if (freezeMinutes < config.minFreezeTime) freezeMinutes = config.minFreezeTime
       }
       const freezeMs = freezeMinutes * 60 * 1000
-      
+
       // 检查用户是否有其他挂单，如果有则排队（由前往后依次读秒）
       const userPendingOrders = await ctx.database.get('bourse_pending', { userId: visibleUserId }, { sort: { endTime: 'desc' }, limit: 1 })
       let startTime = new Date()
@@ -1171,20 +1193,31 @@ export function apply(ctx: Context, config: Config) {
   ctx.command('stock.sell <amount:number>', '卖出股票')
     .userFields(['id'])
     .action(async ({ session }, amount) => {
-      if (!amount || amount <= 0 || !Number.isInteger(amount)) return '请输入有效的卖出股数。'
+      if (!amount || amount <= 0 || !Number.isInteger(amount)) {
+        logger.warn(`stock.sell: 非法卖出数量 user=${session.userId}, amount=${amount}`)
+        return '请输入有效的卖出股数。'
+      }
       if (!await isMarketOpen()) return '休市中，无法交易。'
 
-      const uid = session.user?.id
+      let uid = session.user?.id
       const visibleUserId = session.userId
-      
+
       if (!uid || typeof uid !== 'number') {
-        return '无法获取用户ID，请稍后重试。'
+        // 尝试转一次数字，再验证
+        const parsedUid = Number(uid)
+        if (isNaN(parsedUid)) {
+          logger.error(`stock.sell: 无法获取数字UID user=${session.userId}`)
+          return '无法获取用户ID，请稍后重试。'
+        }
+        uid = parsedUid
       }
 
       const holding = await ctx.database.get('bourse_holding', { userId: visibleUserId, stockId })
 
       if (holding.length === 0 || holding[0].amount < amount) {
-        return `持仓不足！当前持有: ${holding.length ? holding[0].amount : 0} 股。`
+        const currentAmount = holding.length ? holding[0].amount : 0
+        logger.warn(`stock.sell: 持仓不足 user=${session.userId}, amount=${amount}, current=${currentAmount}`)
+        return `持仓不足！当前持有: ${currentAmount} 股。`
       }
 
       // 计算卖出部分对应的成本（按比例扣减）
@@ -1205,7 +1238,7 @@ export function apply(ctx: Context, config: Config) {
         await ctx.database.remove('bourse_holding', { userId: visibleUserId, stockId })
       } else {
         const newTotalCost = Number((existingTotalCost - soldCost).toFixed(2))
-        await ctx.database.set('bourse_holding', { userId: visibleUserId, stockId }, { 
+        await ctx.database.set('bourse_holding', { userId: visibleUserId, stockId }, {
           amount: newAmount,
           totalCost: Math.max(0, newTotalCost) // 确保不为负数
         })
@@ -1223,7 +1256,7 @@ export function apply(ctx: Context, config: Config) {
         if (freezeMinutes < config.minFreezeTime) freezeMinutes = config.minFreezeTime
       }
       const freezeMs = freezeMinutes * 60 * 1000
-      
+
       // 检查用户是否有其他挂单，如果有则排队（由前往后依次读秒）
       const userPendingOrders = await ctx.database.get('bourse_pending', { userId: visibleUserId }, { sort: { endTime: 'desc' }, limit: 1 })
       let startTime = new Date()
@@ -1319,7 +1352,7 @@ export function apply(ctx: Context, config: Config) {
         const avgCost = hasCostData && h.amount > 0 ? Number((totalCost / h.amount).toFixed(2)) : 0
         const profit = hasCostData ? Number((marketValue - totalCost).toFixed(2)) : null
         const profitPercent = hasCostData && totalCost > 0 ? Number(((profit / totalCost) * 100).toFixed(2)) : null
-        
+
         holdingData = {
           stockName: config.stockName,
           amount: h.amount,
@@ -1354,22 +1387,25 @@ export function apply(ctx: Context, config: Config) {
 
   ctx.command('stock.control <price:number> [hours:number]', '管理员：设置宏观调控目标', { authority: 3 })
     .action(async ({ session }, price, hours) => {
-      if (!price || price <= 0) return '请输入有效的目标价格。'
+      if (!price || price <= 0) {
+        logger.warn(`stock.control: 非法目标价格 user=${session.userId}, price=${price}`)
+        return '请输入有效的目标价格。'
+      }
       const duration = hours || 24 // 默认24小时
-      
+
       const now = new Date()
       const endTime = new Date(now.getTime() + duration * 3600 * 1000)
-      
+
       // 新的手动调控：开启一个全新周期，避免与旧周期叠加造成停滞
       const baseStart = currentPrice
       const dayBase = dailyOpenPrice ?? baseStart
       const upper = Math.min(baseStart * 1.5, dayBase * 1.5)
       const lower = Math.max(baseStart * 0.5, dayBase * 0.5)
       const targetPriceClamped = Math.max(lower, Math.min(upper, price))
-      
+
       const minutes = duration * 60
       const trendFactor = (targetPriceClamped - currentPrice) / minutes
-      
+
       const newState: BourseState = {
         key: 'macro_state',
         lastCycleStart: now,          // 开启新周期
@@ -1379,7 +1415,7 @@ export function apply(ctx: Context, config: Config) {
         mode: 'manual',
         endTime
       }
-      
+
       // 写入数据库
       const existing = await ctx.database.get('bourse_state', { key: 'macro_state' })
       if (existing.length === 0) {
@@ -1388,7 +1424,7 @@ export function apply(ctx: Context, config: Config) {
         const { key, ...updateFields } = newState
         await ctx.database.set('bourse_state', { key: 'macro_state' }, updateFields)
       }
-      
+
       // 立即触发一次更新以应用新状态（可选，这里仅更新状态）
       const hint = targetPriceClamped !== price ? `（已按±50%限幅从${price}调整为${Number(targetPriceClamped.toFixed(2))}）` : ''
       return `宏观调控已设置：\n目标价格：${Number(targetPriceClamped.toFixed(2))}${hint}\n期限：${duration}小时\n模式：手动干预\n到期后将自动切回随机调控。`
@@ -1396,29 +1432,31 @@ export function apply(ctx: Context, config: Config) {
 
   ctx.command('bourse.admin.market <status>', '设置股市开关状态 (open/close/auto)', { authority: 3 })
     .action(async ({ session }, status) => {
-      if (!['open', 'close', 'auto'].includes(status)) return '无效状态，请使用 open, close, 或 auto'
-      
+      if (!['open', 'close', 'auto'].includes(status)) {
+        logger.warn(`bourse.admin.market: 非法状态 user=${session.userId}, status=${status}`)
+        return '无效状态，请使用 open, close, 或 auto'
+      }
       // 检查是否是从关闭状态变为开启
       const wasOpen = await isMarketOpen()
-      
+
       const key = 'macro_state'
       const existing = await ctx.database.get('bourse_state', { key })
       if (existing.length === 0) {
-         const now = new Date()
-         await ctx.database.create('bourse_state', {
-            key,
-            lastCycleStart: now,
-            startPrice: config.initialPrice,
-            targetPrice: config.initialPrice,
-            trendFactor: 0,
-            mode: 'auto',
-            endTime: new Date(now.getTime() + 24*3600*1000),
-            marketOpenStatus: status as 'open' | 'close' | 'auto'
-         })
+        const now = new Date()
+        await ctx.database.create('bourse_state', {
+          key,
+          lastCycleStart: now,
+          startPrice: config.initialPrice,
+          targetPrice: config.initialPrice,
+          trendFactor: 0,
+          mode: 'auto',
+          endTime: new Date(now.getTime() + 24 * 3600 * 1000),
+          marketOpenStatus: status as 'open' | 'close' | 'auto'
+        })
       } else {
-         await ctx.database.set('bourse_state', { key }, { marketOpenStatus: status as 'open' | 'close' | 'auto' })
+        await ctx.database.set('bourse_state', { key }, { marketOpenStatus: status as 'open' | 'close' | 'auto' })
       }
-      
+
       // 如果是开市操作（从关闭变为开启），切换K线模型
       if (status === 'open' && !wasOpen) {
         switchKLinePattern('管理员开市')
@@ -1426,7 +1464,7 @@ export function apply(ctx: Context, config: Config) {
       } else if (status === 'close') {
         wasMarketOpen = false
       }
-      
+
       return `股市状态已设置为: ${status}`
     })
 
@@ -1524,8 +1562,8 @@ export function apply(ctx: Context, config: Config) {
 
   // 渲染持仓信息为 HTML 图片
   async function renderHoldingImage(
-    ctx: Context, 
-    username: string, 
+    ctx: Context,
+    username: string,
     holding: {
       stockName: string
       amount: number
@@ -1546,31 +1584,36 @@ export function apply(ctx: Context, config: Config) {
     }[],
     currency: string
   ) {
-    // 读取模板文件
-    const fs = require('fs')
-    const path = require('path')
-    const templatePath = path.join(__dirname, 'templates', 'holding-card.html')
-    let template = fs.readFileSync(templatePath, 'utf-8')
+    try {
+      const templatePath = resolve(__dirname, 'templates', 'holding-card.html')
+      let template = await fs.readFile(templatePath, 'utf-8')
 
-    // 准备数据对象
-    const data = {
-      username,
-      holding,
-      pending,
-      currency,
-      updateTime: new Date().toLocaleString('zh-CN')
+      // 准备数据对象
+      const data = {
+        username,
+        holding,
+        pending,
+        currency,
+        updateTime: new Date().toLocaleString('zh-CN')
+      }
+
+      // 将数据注入到模板中
+      template = template.replace('{{DATA}}', JSON.stringify(data))
+
+      const page = await ctx.puppeteer.page()
+      try {
+        await page.setContent(template)
+        const element = await page.$('.card')
+        if (!element) throw new Error('找不到 .card 元素')
+        const imgBuf = await element.screenshot({ encoding: 'binary' })
+        return h.image(imgBuf, 'image/png')
+      } finally {
+        await page.close()
+      }
+    } catch (err) {
+      logger.error('renderHoldingImage 失败:', err)
+      return `[错误] 生成图片失败: ${err.message}`
     }
-
-    // 将数据注入到模板中
-    template = template.replace('{{DATA}}', JSON.stringify(data))
-
-    const page = await ctx.puppeteer.page()
-    await page.setContent(template)
-    const element = await page.$('.card')
-    const imgBuf = await element?.screenshot({ encoding: 'binary' })
-    await page.close()
-    
-    return h.image(imgBuf, 'image/png')
   }
 
   // 渲染交易结果为 HTML 图片
@@ -1598,116 +1641,132 @@ export function apply(ctx: Context, config: Config) {
       pendingEndTime?: string | null
     }
   ) {
-    const fs = require('fs')
-    const path = require('path')
-    const templatePath = path.join(__dirname, 'templates', 'trade-result.html')
-    let template = fs.readFileSync(templatePath, 'utf-8')
+    try {
+      const templatePath = resolve(__dirname, 'templates', 'trade-result.html')
+      let template = await fs.readFile(templatePath, 'utf-8')
 
-    // 找到交易发生的时间点索引（最新的价格点）
-    const tradeIndex = priceHistory.length - 1
-    const status = tradeMeta?.status ?? 'settled'
-    const pendingMinutes = tradeMeta?.pendingMinutes ?? 0
-    const pendingEndTime = tradeMeta?.pendingEndTime ?? null
+      // 找到交易发生的时间点索引（最新的价格点）
+      const tradeIndex = priceHistory.length - 1
+      const status = tradeMeta?.status ?? 'settled'
+      const pendingMinutes = tradeMeta?.pendingMinutes ?? 0
+      const pendingEndTime = tradeMeta?.pendingEndTime ?? null
 
-    // 准备数据对象
-    const data = {
-      tradeType,
-      stockName,
-      amount,
-      tradePrice,
-      totalCost,
-      currency,
-      tradeTime: new Date().toLocaleString('zh-CN'),
-      prices: priceHistory.map(d => d.price),
-      timestamps: priceHistory.map(d => d.timestamp),
-      tradeIndex,
-      // 卖出额外信息
-      avgBuyPrice: sellInfo?.avgBuyPrice ?? null,
-      buyCost: sellInfo?.buyCost ?? null,
-      profit: sellInfo?.profit ?? null,
-      profitPercent: sellInfo?.profitPercent ?? null,
-      // 买入后持仓
-      newHolding: newHolding ?? amount,
-      status,
-      pendingMinutes,
-      pendingEndTime
+      // 准备数据对象
+      const data = {
+        tradeType,
+        stockName,
+        amount,
+        tradePrice,
+        totalCost,
+        currency,
+        tradeTime: new Date().toLocaleString('zh-CN'),
+        prices: priceHistory.map(d => d.price),
+        timestamps: priceHistory.map(d => d.timestamp),
+        tradeIndex,
+        // 卖出额外信息
+        avgBuyPrice: sellInfo?.avgBuyPrice ?? null,
+        buyCost: sellInfo?.buyCost ?? null,
+        profit: sellInfo?.profit ?? null,
+        profitPercent: sellInfo?.profitPercent ?? null,
+        // 买入后持仓
+        newHolding: newHolding ?? amount,
+        status,
+        pendingMinutes,
+        pendingEndTime
+      }
+
+      template = template.replace('{{DATA}}', JSON.stringify(data))
+
+      const page = await ctx.puppeteer.page()
+      try {
+        await page.setContent(template)
+        const element = await page.$('.card')
+        if (!element) throw new Error('找不到 .card 元素')
+        const imgBuf = await element.screenshot({ encoding: 'binary' })
+        return h.image(imgBuf, 'image/png')
+      } finally {
+        await page.close()
+      }
+    } catch (err) {
+      logger.error('renderTradeResultImage 失败:', err)
+      return `[错误] 生成交易确认单失败: ${err.message}`
     }
-
-    template = template.replace('{{DATA}}', JSON.stringify(data))
-
-    const page = await ctx.puppeteer.page()
-    await page.setContent(template)
-    const element = await page.$('.card')
-    const imgBuf = await element?.screenshot({ encoding: 'binary' })
-    await page.close()
-
-    return h.image(imgBuf, 'image/png')
   }
-  
-  async function renderStockImage(ctx: Context, data: {time: string, price: number, timestamp: number}[], name: string, viewLabel: string, current: number, high: number, low: number) {
-    if (data.length < 2) return '数据不足，无法绘制走势图。'
-    
-    const startPrice = data[0].price
-    const change = current - startPrice
-    const changePercent = (change / startPrice) * 100
-    const isUp = change >= 0
-    
-    // 读取 HTML 模板
-    const templatePath = resolve(__dirname, 'templates', 'stock-chart.html')
-    let html = await fs.readFile(templatePath, 'utf-8')
-    
-    // 配色方案：专业金融风格（参考 TradingView）
-    // 涨: #089981 (Green), 跌: #f23645 (Red) - 国际惯例，或者国内惯例 涨红跌绿
-    // 这里保持国内习惯：涨红(#f23645) 跌绿(#089981)
-    const colorScheme = {
-      mainColor: isUp ? '#f23645' : '#089981',
-      gradientStart: isUp ? 'rgba(242, 54, 69, 0.25)' : 'rgba(8, 153, 129, 0.25)',
-      gradientEnd: 'rgba(255, 255, 255, 0)',
-      glowColor: isUp ? 'rgba(242, 54, 69, 0.4)' : 'rgba(8, 153, 129, 0.4)',
-      iconGradientStart: isUp ? '#f23645' : '#089981',
-      iconGradientEnd: isUp ? '#ff7e87' : '#40c2aa',
-      iconShadow: isUp ? 'rgba(242, 54, 69, 0.3)' : 'rgba(8, 153, 129, 0.3)',
-      changeBadgeBg: isUp ? 'rgba(242, 54, 69, 0.12)' : 'rgba(8, 153, 129, 0.12)'
-    }
-    
-    // 替换模板变量
-    const replacements: Record<string, string> = {
-      '{{MAIN_COLOR}}': colorScheme.mainColor,
-      '{{GRADIENT_START}}': colorScheme.gradientStart,
-      '{{GRADIENT_END}}': colorScheme.gradientEnd,
-      '{{GLOW_COLOR}}': colorScheme.glowColor,
-      '{{ICON_GRADIENT_START}}': colorScheme.iconGradientStart,
-      '{{ICON_GRADIENT_END}}': colorScheme.iconGradientEnd,
-      '{{ICON_SHADOW}}': colorScheme.iconShadow,
-      '{{CHANGE_BADGE_BG}}': colorScheme.changeBadgeBg,
-      '{{STOCK_NAME}}': name,
-      '{{VIEW_LABEL}}': viewLabel,
-      '{{CURRENT_TIME}}': new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
-      '{{CURRENT_PRICE}}': current.toFixed(2),
-      '{{CHANGE_VALUE}}': `${change >= 0 ? '+' : ''}${change.toFixed(2)}`,
-      '{{CHANGE_ICON}}': change >= 0 ? '↑' : '↓',
-      '{{CHANGE_PERCENT}}': Math.abs(changePercent).toFixed(2),
-      '{{HIGH_PRICE}}': high.toFixed(2),
-      '{{LOW_PRICE}}': low.toFixed(2),
-      '{{AMPLITUDE}}': ((high - low) / startPrice * 100).toFixed(2),
-      '{{START_PRICE}}': startPrice.toFixed(2),
-      '{{UPDATE_TIME}}': new Date().toLocaleString('zh-CN'),
-      '{{PRICES}}': JSON.stringify(data.map(d => d.price)),
-      '{{TIMES}}': JSON.stringify(data.map(d => d.time)),
-      '{{TIMESTAMPS}}': JSON.stringify(data.map(d => d.timestamp))
-    }
-    
-    // 批量替换所有变量
-    for (const [key, value] of Object.entries(replacements)) {
-      html = html.replace(new RegExp(key, 'g'), value)
-    }
 
-    const page = await ctx.puppeteer.page()
-    await page.setContent(html)
-    const element = await page.$('.card')
-    const imgBuf = await element?.screenshot({ encoding: 'binary' })
-    await page.close()
-    
-    return h.image(imgBuf, 'image/png')
+  async function renderStockImage(ctx: Context, data: { time: string, price: number, timestamp: number }[], name: string, viewLabel: string, current: number, high: number, low: number) {
+    if (data.length < 2) {
+      logger.warn(`renderStockImage: 数据点不足(${data.length})，无法绘制图表`)
+      return '数据不足，无法绘制走势图。'
+    }
+    try {
+      const startPrice = data[0].price
+      const change = current - startPrice
+      const changePercent = (change / startPrice) * 100
+      const isUp = change >= 0
+
+      // 读取 HTML 模板
+      const templatePath = resolve(__dirname, 'templates', 'stock-chart.html')
+      let html = await fs.readFile(templatePath, 'utf-8')
+
+      // 配色方案：专业金融风格（参考 TradingView）
+      // 涨: #089981 (Green), 跌: #f23645 (Red) - 国际惯例，或者国内惯例 涨红跌绿
+      // 这里保持国内习惯：涨红(#f23645) 跌绿(#089981)
+      const colorScheme = {
+        mainColor: isUp ? '#f23645' : '#089981',
+        gradientStart: isUp ? 'rgba(242, 54, 69, 0.25)' : 'rgba(8, 153, 129, 0.25)',
+        gradientEnd: 'rgba(255, 255, 255, 0)',
+        glowColor: isUp ? 'rgba(242, 54, 69, 0.4)' : 'rgba(8, 153, 129, 0.4)',
+        iconGradientStart: isUp ? '#f23645' : '#089981',
+        iconGradientEnd: isUp ? '#ff7e87' : '#40c2aa',
+        iconShadow: isUp ? 'rgba(242, 54, 69, 0.3)' : 'rgba(8, 153, 129, 0.3)',
+        changeBadgeBg: isUp ? 'rgba(242, 54, 69, 0.12)' : 'rgba(8, 153, 129, 0.12)'
+      }
+
+      // 替换模板变量
+      const replacements: Record<string, string> = {
+        '{{MAIN_COLOR}}': colorScheme.mainColor,
+        '{{GRADIENT_START}}': colorScheme.gradientStart,
+        '{{GRADIENT_END}}': colorScheme.gradientEnd,
+        '{{GLOW_COLOR}}': colorScheme.glowColor,
+        '{{ICON_GRADIENT_START}}': colorScheme.iconGradientStart,
+        '{{ICON_GRADIENT_END}}': colorScheme.iconGradientEnd,
+        '{{ICON_SHADOW}}': colorScheme.iconShadow,
+        '{{CHANGE_BADGE_BG}}': colorScheme.changeBadgeBg,
+        '{{STOCK_NAME}}': name,
+        '{{VIEW_LABEL}}': viewLabel,
+        '{{CURRENT_TIME}}': new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+        '{{CURRENT_PRICE}}': current.toFixed(2),
+        '{{CHANGE_VALUE}}': `${change >= 0 ? '+' : ''}${change.toFixed(2)}`,
+        '{{CHANGE_ICON}}': change >= 0 ? '↑' : '↓',
+        '{{CHANGE_PERCENT}}': Math.abs(changePercent).toFixed(2),
+        '{{HIGH_PRICE}}': high.toFixed(2),
+        '{{LOW_PRICE}}': low.toFixed(2),
+        '{{AMPLITUDE}}': ((high - low) / startPrice * 100).toFixed(2),
+        '{{START_PRICE}}': startPrice.toFixed(2),
+        '{{UPDATE_TIME}}': new Date().toLocaleString('zh-CN'),
+        '{{PRICES}}': JSON.stringify(data.map(d => d.price)),
+        '{{TIMES}}': JSON.stringify(data.map(d => d.time)),
+        '{{TIMESTAMPS}}': JSON.stringify(data.map(d => d.timestamp))
+      }
+
+      // 批量替换所有变量
+      for (const [key, value] of Object.entries(replacements)) {
+        html = html.replace(new RegExp(key, 'g'), value)
+      }
+
+      const page = await ctx.puppeteer.page()
+      try {
+        await page.setContent(html)
+        const element = await page.$('.card')
+        if (!element) throw new Error('找不到 .card 元素')
+        const imgBuf = await element.screenshot({ encoding: 'binary' })
+        return h.image(imgBuf, 'image/png')
+      } finally {
+        await page.close()
+      }
+    } catch (err) {
+      logger.error('renderStockImage 失败:', err)
+      return `[错误] 生成行情图失败: ${err.message}`
+    }
   }
 }
