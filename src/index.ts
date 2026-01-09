@@ -1074,12 +1074,30 @@ export function apply(ctx: Context, config: Config) {
         }
       })
 
-      const high = Math.max(...formattedData.map(d => d.price))
-      const low = Math.min(...formattedData.map(d => d.price))
+      // 将实时价格追加到数据末尾，确保图表显示最新价格
+      // 仅当历史最后一条记录的价格与当前实时价格不同时追加
+      const lastHistoryPrice = formattedData[formattedData.length - 1]?.price
+      if (lastHistoryPrice !== currentPrice) {
+        const nowTime = new Date()
+        let nowTimeStr = nowTime.toLocaleTimeString()
+        if (interval === 'week' || interval === 'day') {
+          nowTimeStr = `${nowTime.getMonth() + 1}-${nowTime.getDate()} ${nowTime.getHours()}:${nowTime.getMinutes().toString().padStart(2, '0')}`
+        }
+        formattedData.push({
+          time: nowTimeStr,
+          price: currentPrice,
+          timestamp: nowTime.getTime()
+        })
+      }
+
+      // 高低价计算需包含实时价格
+      const high = Math.max(...formattedData.map(d => d.price), currentPrice)
+      const low = Math.min(...formattedData.map(d => d.price), currentPrice)
 
       const viewLabel = interval === 'week' ? '周走势' : interval === 'day' ? '日走势' : '实时走势'
 
-      const img = await renderStockImage(ctx, formattedData, config.stockName, viewLabel, latest.price, high, low)
+      // 使用实时价格 currentPrice 而非历史最后一条 latest.price
+      const img = await renderStockImage(ctx, formattedData, config.stockName, viewLabel, currentPrice, high, low)
       return img
     })
 
