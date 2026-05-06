@@ -240,11 +240,15 @@
       /* 增加高度以容纳更大的字体 */
     }
 
+    .stats-grid.sell-grid {
+      grid-template-columns: 1fr 1fr 1fr 1fr;
+    }
+
     .stat-item {
       background: var(--item-bg);
       border: 1px solid var(--border-color);
       border-radius: 12px;
-      padding: 20px 28px;
+      padding: 16px 20px;
       display: flex;
       flex-direction: column;
       justify-content: center;
@@ -369,26 +373,6 @@
   </script>
 
   <script>
-    // 模拟数据用于测试
-    /*
-    const TEST_DATA = {
-      tradeType: 'buy',
-      stockName: 'NVDA · NVIDIA Corp',
-      status: 'pending',
-      pendingMinutes: 5.5,
-      pendingEndTime: '14:35',
-      tradePrice: 485.20,
-      amount: 10,
-      totalCost: 4852.00,
-      tradeTime: '2023-10-27 10:30:05',
-      newHolding: 150,
-      currency: 'USD',
-      prices: [480, 482, 481, 483, 485, 484, 486, 485.2, 487, 488, 486],
-      timestamps: [1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000, 11000],
-      tradeIndex: 7
-    };
-    */
-
     let DATA;
     try {
       DATA = JSON.parse(document.getElementById('data-source').textContent);
@@ -400,16 +384,7 @@
     const status = DATA.status || 'settled';
     const isPending = status === 'pending';
 
-    const colors = {
-      buy: '#f87171',
-      sell: '#4ade80',
-      pending: '#eab308',
-      grid: '#30363d',
-      text: '#f0f3f5',
-      textDim: '#8b949e'
-    };
-
-    const mainColor = isBuy ? colors.buy : colors.sell;
+    const mainColor = isBuy ? '#f87171' : '#4ade80';
 
     // --- 1. 渲染顶部基本信息 ---
     document.getElementById('stock-name').textContent = DATA.stockName || 'Unknown Stock';
@@ -465,7 +440,9 @@
       const isProfit = profit >= 0;
       const profitClass = isProfit ? 'profit' : 'loss';
       const profitSign = isProfit ? '+' : '';
+      const hasFee = DATA.fee !== null && DATA.fee > 0;
 
+      statsGrid.classList.add('sell-grid');
       statsGrid.innerHTML = `
         <div class="stat-item highlight">
           <div class="stat-label">Revenue 卖出金额</div>
@@ -473,9 +450,14 @@
           <div class="stat-sub">${DATA.currency}</div>
         </div>
         <div class="stat-item">
-          <div class="stat-label">Cost Basis 买入成本</div>
-          <div class="stat-value">${DATA.avgBuyPrice ? DATA.avgBuyPrice.toFixed(2) : '--'}</div>
-          <div class="stat-sub">每股</div>
+          <div class="stat-label">Fee 手续费</div>
+          <div class="stat-value">${hasFee ? DATA.fee.toFixed(2) : '--'}</div>
+          <div class="stat-sub">${DATA.currency}${hasFee ? ` (${DATA.feePercent}%)` : ''}</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">Net 到账</div>
+          <div class="stat-value">${(DATA.totalCost - (DATA.fee || 0)).toFixed(2)}</div>
+          <div class="stat-sub">${DATA.currency}</div>
         </div>
         <div class="stat-item ${profitClass}">
           <div class="stat-label">P/L 盈亏</div>
@@ -530,7 +512,7 @@
 
         // 价格标签 (字体也同步调整为 Roboto Mono 且加大)
         const val = yMin + (i / gridLines) * yRange;
-        ctx.fillStyle = colors.textDim;
+        ctx.fillStyle = '#8b949e';
         // 修改 1 & 2: 增大字号到 14px 并使用 Roboto Mono
         ctx.font = '500 14px "Roboto Mono", monospace';
         ctx.textAlign = 'left';

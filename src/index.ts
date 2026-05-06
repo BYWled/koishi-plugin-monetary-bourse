@@ -82,7 +82,28 @@ export interface BourseState {
   marketOpenStatus?: "open" | "close" | "auto"; // 市场开关状态
 }
 
-// --- 插件配置 ---
+export const usage = `
+<div style="max-width: 800px; font-family: sans-serif; line-height: 1.6;">
+  <div style="margin-bottom: 24px;">
+    <h1 style="border-bottom: none; margin-bottom: 8px; font-size: 28px;">📈 monetary-bourse</h1>
+    <p style="opacity: 0.8; font-size: 14px;">基于货币系统的可视化股票交易所插件，支持自动宏观调控与拟真 K 线形态。</p>
+  </div>
+
+  <h3>⚙️ 配置项</h3>
+  <ul style="margin-top: 8px; margin-bottom: 20px;">
+    <li><b>基础设置</b>：自定义货币单位（需与 monetary 系统一致）、股票名称、初始价格，以及单人最大持仓限额。</li>
+    <li><b>股市开关与时间</b>：控制股市启动状态，支持设定每日开市 <code>openHour</code> 与休市 <code>closeHour</code> 实现自动启停。</li>
+    <li><b>防刷冻结机制</b>：防止用户低买高卖高频刷单。通过 <code>freezeCostPerMinute</code> 调整资金与排队时间比例；设定 <code>minFreezeTime</code> 与 <code>maxFreezeTime</code> 防止过长或过短排队。可将最小时间设为 0 使小额交易秒成。</li>
+    <li><b>手续费与精度</b>：可配置卖出手续费 <code>sellFeePercent</code> 提升博弈成本；若你使用的通货不支持小数，请开启 <code>precisionInteger</code>。</li>
+    <li><b>宏观调控引擎</b>：调整 <code>biasMax</code> 限制期望偏倚的极端值。此外，可以固定每日定期刷新宏观目标的时刻，以便在人流高峰期制造行情的明确转折。</li>
+  </ul>
+
+  <h3>📖 开发者建议</h3>
+  <p style="font-size: 14px; opacity: 0.85;">
+    部署初期，建议在下方开启 <code>enableDebug</code>，通过 <code>bourse.test.price</code> 或 <code>bourse.test.run</code> 指令生成未来一段时间的模拟量价切片，以此验证当前的参数配置是否符合贵群的市场节奏和购买力水平。调整最佳后再关闭调试选项。
+  </p>
+</div>
+`;
 
 export interface Config {
   currency: string;
@@ -93,13 +114,22 @@ export interface Config {
   openHour: number;
   closeHour: number;
   // 冻结机制设置
-  freezeCostPerMinute: number; // 每多少货币计为1分钟冻结时间
-  minFreezeTime: number; // 最小冻结时间（分钟）
-  maxFreezeTime: number; // 最大冻结时间（分钟）
+  freezeCostPerMinute: number;
+  minFreezeTime: number;
+  maxFreezeTime: number;
   // 股市开关
   marketStatus: "open" | "close" | "auto";
   // 开发者选项
   enableDebug: boolean;
+  // 手续费
+  sellFeePercent: number;
+  // 精度控制
+  precisionInteger: boolean;
+  // 宏观调控 — 固定更新时间
+  fixedUpdateTime: boolean;
+  fixedUpdateHour: number;
+  // 宏观调控 — 期望偏倚最大值
+  biasMax: number;
 }
 
 export const Config: Schema<Config> = Schema.intersect([
@@ -154,6 +184,36 @@ export const Config: Schema<Config> = Schema.intersect([
       .default(1440)
       .description("最大交易冻结时间(分钟)"),
   }).description("冻结机制"),
+
+  Schema.object({
+    sellFeePercent: Schema.number()
+      .min(0)
+      .max(100)
+      .step(0.01)
+      .default(0)
+      .description("卖出手续费（%）"),
+    precisionInteger: Schema.boolean()
+      .default(false)
+      .description("是否将所有计数精度设置为整数"),
+  }).description("手续费与精度"),
+
+  Schema.object({
+    fixedUpdateTime: Schema.boolean()
+      .default(false)
+      .description("是否固定宏观目标的更新时间"),
+    fixedUpdateHour: Schema.number()
+      .min(0)
+      .max(23)
+      .step(1)
+      .default(9)
+      .description("固定更新时间（小时，仅 fixedUpdateTime 为 true 时生效）"),
+    biasMax: Schema.number()
+      .min(0.1)
+      .max(0.9)
+      .step(0.01)
+      .default(0.45)
+      .description("宏观期望上下偏倚的最大值"),
+  }).description("宏观调控高级设置"),
 
   Schema.object({
     enableDebug: Schema.boolean()
@@ -225,6 +285,16 @@ export function apply(ctx: Context, config: Config) {
   const stockId = "MAIN"; // 目前仅支持一支股票
   let currentPrice = Number(config.initialPrice.toFixed(2));
 
+  function fmtPrice(value: number): number {
+    return config.precisionInteger
+      ? Math.round(value)
+      : Number(value.toFixed(2));
+  }
+
+  function fmtAmount(value: number): number {
+    return config.precisionInteger ? Math.round(value) : Number(value.toFixed(2));
+  }
+
   // 启动时加载最近行情，若无则写入初始价格
   ctx.on("ready", async () => {
     const history = await ctx.database.get(
@@ -233,7 +303,7 @@ export function apply(ctx: Context, config: Config) {
       { limit: 1, sort: { time: "desc" } },
     );
     if (history.length > 0) {
-      currentPrice = Number(history[0].price.toFixed(2));
+      currentPrice = fmtPrice(history[0].price);
     } else {
       await ctx.database.create("bourse_history", {
         stockId,
@@ -388,7 +458,7 @@ export function apply(ctx: Context, config: Config) {
 
       const current = Number(records[0].value || 0);
       // 保留两位小数，避免浮点数精度丢失
-      const newValue = Number((current + delta).toFixed(2));
+      const newValue = fmtAmount(current + delta);
 
       if (newValue < 0) {
         logger.warn(
@@ -489,15 +559,15 @@ export function apply(ctx: Context, config: Config) {
         .orderBy("settlementDate", "asc")
         .execute();
 
-      let remaining = Number(amount.toFixed(2));
+      let remaining = fmtAmount(amount);
       for (const record of demandRecords) {
         if (remaining <= 0) break;
 
         if (record.amount <= remaining) {
-          remaining = Number((remaining - record.amount).toFixed(2));
+          remaining = fmtAmount(remaining - record.amount);
           await ctx.database.remove("monetary_bank_int", { id: record.id });
         } else {
-          const newAmount = Number((record.amount - remaining).toFixed(2));
+          const newAmount = fmtAmount(record.amount - remaining);
           await ctx.database.set(
             "monetary_bank_int",
             { id: record.id },
@@ -538,17 +608,17 @@ export function apply(ctx: Context, config: Config) {
       return { success: false, msg };
     }
 
-    let remainingCost = Number(cost.toFixed(2));
+    let remainingCost = fmtAmount(cost);
 
     // 1. 扣除现金
-    const cashDeduct = Number(Math.min(cash, remainingCost).toFixed(2));
+    const cashDeduct = fmtAmount(Math.min(cash, remainingCost));
     if (cashDeduct > 0) {
       const success = await changeCashBalance(uid, currency, -cashDeduct);
       if (!success) {
         logger.error(`pay 失败: 扣除现金失败 uid=${uid}, cost=${cashDeduct}`);
         return { success: false, msg: "扣除现金失败，请重试" };
       }
-      remainingCost = Number((remainingCost - cashDeduct).toFixed(2));
+      remainingCost = fmtAmount(remainingCost - cashDeduct);
     }
 
     // 2. 扣除银行活期
@@ -901,7 +971,7 @@ export function apply(ctx: Context, config: Config) {
 
     if (Math.abs(deviation) > deviationThreshold) {
       const adjustmentStrength = Math.min(Math.abs(deviation) / 0.3, 1);
-      const maxBias = 0.45;
+      const maxBias = config.biasMax;
       if (deviation > 0) {
         bullishProb = 0.33 + adjustmentStrength * maxBias;
         bearishProb = 0.33 - adjustmentStrength * maxBias * 0.7;
@@ -1007,7 +1077,20 @@ export function apply(ctx: Context, config: Config) {
     }
 
     const createAutoState = async () => {
-      const durationHours = 7 * 24; // 一周周期
+      let endTime: Date;
+
+      if (config.fixedUpdateTime) {
+        // Fixed schedule: end at the next occurrence of fixedUpdateHour
+        endTime = new Date(now);
+        endTime.setHours(config.fixedUpdateHour, 0, 0, 0);
+        if (endTime <= now) {
+          endTime.setDate(endTime.getDate() + 1); // next day if time already passed
+        }
+      } else {
+        const durationHours = 7 * 24;
+        endTime = new Date(now.getTime() + durationHours * 3600 * 1000);
+      }
+
       const fluctuation = 0.25; // 周目标波动范围±25%
       const targetRatio = 1 + (Math.random() * 2 - 1) * fluctuation;
       let targetPrice = currentPrice * targetRatio;
@@ -1017,8 +1100,6 @@ export function apply(ctx: Context, config: Config) {
         currentPrice * 0.5,
         Math.min(currentPrice * 1.5, targetPrice),
       );
-
-      const endTime = new Date(now.getTime() + durationHours * 3600 * 1000);
 
       const newState: BourseState = {
         key: "macro_state",
@@ -1156,7 +1237,7 @@ export function apply(ctx: Context, config: Config) {
     newPrice = Math.max(lowerLimit, Math.min(upperLimit, newPrice));
     if (newPrice < 1) newPrice = 1;
 
-    newPrice = Number(newPrice.toFixed(2));
+    newPrice = fmtPrice(newPrice);
     currentPrice = newPrice;
     await ctx.database.create("bourse_history", {
       stockId,
@@ -1185,7 +1266,7 @@ export function apply(ctx: Context, config: Config) {
             userId: txn.userId,
             stockId,
             amount: txn.amount,
-            totalCost: Number(txn.cost.toFixed(2)),
+            totalCost: fmtAmount(txn.cost),
           });
         } else {
           // 兼容旧版本数据：totalCost 可能为 undefined 或 null 或 0
@@ -1194,12 +1275,12 @@ export function apply(ctx: Context, config: Config) {
           let existingCost = holding[0].totalCost;
           if (!existingCost || existingCost <= 0) {
             // 用交易时的单价估算旧持仓成本（比用当前市价更准确，因为交易时价格更接近用户买入时的价格）
-            existingCost = Number((holding[0].amount * txn.price).toFixed(2));
+            existingCost = fmtAmount(holding[0].amount * txn.price);
             logger.info(
               `processPendingTransactions: 旧持仓无成本记录，使用交易价格估算: ${holding[0].amount}股 * ${txn.price} = ${existingCost}`,
             );
           }
-          const newTotalCost = Number((existingCost + txn.cost).toFixed(2));
+          const newTotalCost = fmtAmount(existingCost + txn.cost);
           await ctx.database.set(
             "bourse_holding",
             { userId: txn.userId, stockId },
@@ -1218,8 +1299,7 @@ export function apply(ctx: Context, config: Config) {
           typeof txn.uid === "number" &&
           !Number.isNaN(txn.uid)
         ) {
-          // 保留两位小数
-          const amount = Number(txn.cost.toFixed(2));
+          const amount = fmtAmount(txn.cost);
           const success = await changeCashBalance(
             txn.uid,
             config.currency,
@@ -1289,23 +1369,24 @@ export function apply(ctx: Context, config: Config) {
       const now = new Date();
 
       if (interval === "day") {
-        const startTime = new Date(now.getTime() - 24 * 3600 * 1000);
+        const todayOpen = new Date(now);
+        todayOpen.setHours(config.openHour, 0, 0, 0);
+        const dayAgo = new Date(now.getTime() - 24 * 3600 * 1000);
+        // Use the later of: 24h ago, or today's market open
+        let startTime = todayOpen > dayAgo ? todayOpen : dayAgo;
+        if (startTime > now) startTime = dayAgo;
         history = await ctx.database.get(
           "bourse_history",
-          {
-            stockId,
-            time: { $gte: startTime },
-          },
+          { stockId, time: { $gte: startTime } },
           { sort: { time: "asc" } },
         );
       } else if (interval === "week") {
-        const startTime = new Date(now.getTime() - 7 * 24 * 3600 * 1000);
+        const weekAgo = new Date(now.getTime() - 7 * 24 * 3600 * 1000);
+        // Always align to market open for consistent week-over-week windows
+        weekAgo.setHours(config.openHour, 0, 0, 0);
         history = await ctx.database.get(
           "bourse_history",
-          {
-            stockId,
-            time: { $gte: startTime },
-          },
+          { stockId, time: { $gte: weekAgo } },
           { sort: { time: "asc" } },
         );
       } else {
@@ -1433,7 +1514,7 @@ export function apply(ctx: Context, config: Config) {
         return "无法获取用户ID，请稍后重试。";
       }
 
-      const cost = Number((currentPrice * amount).toFixed(2));
+      const cost = fmtAmount(currentPrice * amount);
 
       // 支付流程：现金 + 银行活期
       const payResult = await pay(uid, cost, config.currency);
@@ -1600,17 +1681,15 @@ export function apply(ctx: Context, config: Config) {
       // 如果没有成本记录，用当前市价估算（这样卖出后盈亏显示为0，符合预期）
       let existingTotalCost = currentHolding.totalCost;
       if (!existingTotalCost || existingTotalCost <= 0) {
-        existingTotalCost = Number(
-          (currentHolding.amount * currentPrice).toFixed(2),
-        );
+        existingTotalCost = fmtAmount(currentHolding.amount * currentPrice);
         logger.info(
           `stock.sell: 旧持仓无成本记录，使用当前市价估算: ${currentHolding.amount}股 * ${currentPrice} = ${existingTotalCost}`,
         );
       }
-      const avgCostPerShare = Number(
-        (existingTotalCost / currentHolding.amount).toFixed(2),
+      const avgCostPerShare = fmtPrice(
+        existingTotalCost / currentHolding.amount,
       );
-      const soldCost = Number((avgCostPerShare * amount).toFixed(2));
+      const soldCost = fmtAmount(avgCostPerShare * amount);
 
       // 立即扣减持仓和对应成本
       const newAmount = currentHolding.amount - amount;
@@ -1620,7 +1699,7 @@ export function apply(ctx: Context, config: Config) {
           stockId,
         });
       } else {
-        const newTotalCost = Number((existingTotalCost - soldCost).toFixed(2));
+        const newTotalCost = fmtAmount(existingTotalCost - soldCost);
         await ctx.database.set(
           "bourse_holding",
           { userId: visibleUserId, stockId },
@@ -1632,12 +1711,17 @@ export function apply(ctx: Context, config: Config) {
       }
 
       // 计算收益
-      const gain = Number((currentPrice * amount).toFixed(2));
+      const gain = fmtAmount(currentPrice * amount);
+      const feePercent = config.sellFeePercent;
+      const fee = feePercent > 0
+        ? fmtAmount(gain * feePercent / 100)
+        : 0;
+      const netGain = fmtAmount(gain - fee);
       // 计算冻结时间（按交易金额计算）
       // 注意：maxFreezeTime=0 表示无冻结，直接完成交易
       let freezeMinutes = 0;
       if (config.maxFreezeTime > 0) {
-        freezeMinutes = gain / config.freezeCostPerMinute;
+        freezeMinutes = netGain / config.freezeCostPerMinute;
         // 先限制最大值，再限制最小值（确保最小值优先）
         if (freezeMinutes > config.maxFreezeTime)
           freezeMinutes = config.maxFreezeTime;
@@ -1668,14 +1752,14 @@ export function apply(ctx: Context, config: Config) {
         type: "sell",
         amount,
         price: currentPrice,
-        cost: gain,
+        cost: netGain,
         startTime,
         endTime,
       });
 
       const hasCostRecord = existingTotalCost > 0;
       const profit = hasCostRecord
-        ? Number((gain - soldCost).toFixed(2))
+        ? fmtAmount(netGain - soldCost)
         : null;
       const profitPercent =
         hasCostRecord && soldCost > 0
@@ -1714,6 +1798,8 @@ export function apply(ctx: Context, config: Config) {
             buyCost: hasCostRecord ? soldCost : null,
             profit,
             profitPercent,
+            fee: fee > 0 ? fee : null,
+            feePercent: feePercent > 0 ? feePercent : null,
           },
           undefined,
           tradeMeta,
@@ -1736,6 +1822,8 @@ export function apply(ctx: Context, config: Config) {
           buyCost: hasCostRecord ? soldCost : null,
           profit,
           profitPercent,
+          fee: fee > 0 ? fee : null,
+          feePercent: feePercent > 0 ? feePercent : null,
         },
         undefined,
         tradeMeta,
@@ -1766,17 +1854,17 @@ export function apply(ctx: Context, config: Config) {
       let holdingData = null;
       if (holdings.length > 0) {
         const h = holdings[0];
-        const marketValue = Number((h.amount * currentPrice).toFixed(2));
+        const marketValue = fmtAmount(h.amount * currentPrice);
         // 兼容旧版本数据：totalCost 可能为 undefined 或 null 或 0
         const hasCostData =
           h.totalCost !== undefined && h.totalCost !== null && h.totalCost > 0;
-        const totalCost = hasCostData ? Number(h.totalCost.toFixed(2)) : 0;
+        const totalCost = hasCostData ? fmtAmount(h.totalCost) : 0;
         const avgCost =
           hasCostData && h.amount > 0
-            ? Number((totalCost / h.amount).toFixed(2))
+            ? fmtPrice(totalCost / h.amount)
             : 0;
         const profit = hasCostData
-          ? Number((marketValue - totalCost).toFixed(2))
+          ? fmtAmount(marketValue - totalCost)
           : null;
         const profitPercent =
           hasCostData && totalCost > 0
@@ -1786,7 +1874,7 @@ export function apply(ctx: Context, config: Config) {
         holdingData = {
           stockName: config.stockName,
           amount: h.amount,
-          currentPrice: Number(currentPrice.toFixed(2)),
+          currentPrice: fmtPrice(currentPrice),
           avgCost: hasCostData ? avgCost : null, // null 表示无成本记录
           totalCost: hasCostData ? totalCost : null,
           marketValue,
@@ -1807,8 +1895,8 @@ export function apply(ctx: Context, config: Config) {
           type: p.type === "buy" ? "买入" : "卖出",
           typeClass: p.type,
           amount: p.amount,
-          price: Number(p.price.toFixed(2)),
-          cost: Number(p.cost.toFixed(2)),
+          price: fmtPrice(p.price),
+          cost: fmtAmount(p.cost),
           timeLeft: `${minutes}分${seconds}秒`,
         };
       });
@@ -2122,6 +2210,8 @@ export function apply(ctx: Context, config: Config) {
       buyCost: number | null; // 买入成本
       profit: number | null; // 盈亏金额
       profitPercent: number | null; // 盈亏百分比
+      fee: number | null;
+      feePercent: number | null;
     },
     // 买入后的持仓数量
     newHolding?: number,
@@ -2158,6 +2248,8 @@ export function apply(ctx: Context, config: Config) {
         buyCost: sellInfo?.buyCost ?? null,
         profit: sellInfo?.profit ?? null,
         profitPercent: sellInfo?.profitPercent ?? null,
+        fee: sellInfo?.fee ?? null,
+        feePercent: sellInfo?.feePercent ?? null,
         // 买入后持仓
         newHolding: newHolding ?? amount,
         status,
@@ -2211,6 +2303,17 @@ export function apply(ctx: Context, config: Config) {
       // 读取 HTML 模板
       const templatePath = resolve(__dirname, "templates", "stock-chart.html");
       let html = await fs.readFile(templatePath, "utf-8");
+      const g2Path = resolve(__dirname, "templates", "g2.min.js");
+      let g2Script = "";
+      try {
+        g2Script = await fs.readFile(g2Path, "utf-8");
+        g2Script = g2Script.replace(/<\/script>/g, "<\\/script>");
+      } catch (err) {
+        logger.warn(
+          `renderStockImage: failed to read local G2 script: ${g2Path}`,
+          err,
+        );
+      }
 
       // 配色方案：专业金融风格（参考 TradingView）
       // 涨: #089981 (Green), 跌: #f23645 (Red) - 国际惯例，或者国内惯例 涨红跌绿
@@ -2260,11 +2363,12 @@ export function apply(ctx: Context, config: Config) {
         "{{TIMES}}": JSON.stringify(data.map((d) => d.time)),
         "{{TIMESTAMPS}}": JSON.stringify(data.map((d) => d.timestamp)),
         "{{KLINE_DATA}}": JSON.stringify(klineData),
+        "{{G2_SCRIPT}}": g2Script,
       };
 
       // 批量替换所有变量
       for (const [key, value] of Object.entries(replacements)) {
-        html = html.replace(new RegExp(key, "g"), value);
+        html = html.replace(new RegExp(key, "g"), () => value);
       }
 
       const page = await ctx.puppeteer.page();

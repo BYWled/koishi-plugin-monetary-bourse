@@ -8,6 +8,8 @@
         --icon-gradient-end: {{ICON_GRADIENT_END}};
         --icon-shadow: {{ICON_SHADOW}};
         --change-badge-bg: {{CHANGE_BADGE_BG}};
+        --rise-color: #f23645;
+        --fall-color: #089981;
 
         --bg-color: #0c0f15;
         --card-bg: #161b22;
@@ -256,14 +258,16 @@
       <div class="update-time">Updated {{UPDATE_TIME}}</div>
     </div>
 
+    <script>{{G2_SCRIPT}}</script>
     <script>
       const chartType = "{{CHART_TYPE}}";
-      const klineData = JSON.parse("{{KLINE_DATA}}");
-      const prices = JSON.parse("{{PRICES}}");
-      const times = JSON.parse("{{TIMES}}");
-      const timestamps = JSON.parse("{{TIMESTAMPS}}");
-      const riseColor = "#f23645";
-      const fallColor = "#089981";
+      const klineData = {{KLINE_DATA}};
+      const prices = {{PRICES}};
+      const times = {{TIMES}};
+      const timestamps = {{TIMESTAMPS}};
+      const rootStyle = getComputedStyle(document.documentElement);
+      const riseColor = rootStyle.getPropertyValue("--rise-color").trim();
+      const fallColor = rootStyle.getPropertyValue("--fall-color").trim();
 
       function markReady(className) {
         document.body.classList.add(className || "chart-ready");
