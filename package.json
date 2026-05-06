@@ -1,6 +1,6 @@
 {
   "name": "koishi-plugin-monetary-bourse",
-  "version": "2.1.1",
+  "version": "3.0.0-alpha.12",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
   "files": [
@@ -20,8 +20,7 @@
         "database",
         "monetary"
       ]
-    },
-    "preview:": true
+    }
   },
   "license": "MIT",
   "keywords": [
@@ -56,6 +55,7 @@
     "koishi-plugin-puppeteer": "*"
   },
   "dependencies": {
+    "@antv/g2": "^5.4.8",
     "koishi": "^4.18.0",
     "koishi-plugin-monetary": "^0.1.0"
   }
