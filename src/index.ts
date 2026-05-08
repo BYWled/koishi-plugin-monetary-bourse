@@ -52,6 +52,7 @@ declare module "koishi" {
 export interface BourseHolding {
   id: number;
   userId: string;
+  uid: number;
   stockId: string;
   amount: number;
   totalCost: number; // 买入总成本，用于计算盈亏
@@ -87,6 +88,7 @@ export interface BourseState {
   mode: "auto" | "manual"; // 调控模式：自动或手动
   endTime: Date; // 本周期预计结束时间
   marketOpenStatus?: "open" | "close" | "auto"; // 市场开关状态
+  lastDividendDate?: Date; // 上次分红时间
 }
 
 export const usage = `
@@ -101,7 +103,7 @@ export const usage = `
     <li><b>基础设置</b>：自定义货币单位（需与 monetary 系统一致）、股票名称、初始价格，以及单人最大持仓限额。</li>
     <li><b>股市开关与时间</b>：控制股市启动状态，支持设定每日开市 <code>openHour</code> 与休市 <code>closeHour</code> 实现自动启停。</li>
     <li><b>防刷冻结机制</b>：防止用户低买高卖高频刷单。通过 <code>freezeCostPerMinute</code> 调整资金与排队时间比例；设定 <code>minFreezeTime</code> 与 <code>maxFreezeTime</code> 防止过长或过短排队。可将最小时间设为 0 使小额交易秒成。</li>
-    <li><b>手续费与精度</b>：可配置卖出手续费 <code>sellFeePercent</code> 提升博弈成本；若你使用的通货不支持小数，请开启 <code>precisionInteger</code>。</li>
+    <li><b>手续费与精度</b>：可配置分档卖出手续费 <code>sellFeeTiers</code>（股数越大费率越低）；若你使用的通货不支持小数，请开启 <code>precisionInteger</code>。</li>
     <li><b>宏观调控引擎</b>：调整 <code>biasMax</code> 限制期望偏倚的极端值。此外，可以固定每日定期刷新宏观目标的时刻，以便在人流高峰期制造行情的明确转折。</li>
   </ul>
 
@@ -111,6 +113,11 @@ export const usage = `
   </p>
 </div>
 `;
+
+export type SellFeeTier = {
+  minAmount: number;
+  feePercent: number;
+};
 
 export interface Config {
   currency: string;
@@ -129,7 +136,7 @@ export interface Config {
   // 开发者选项
   enableDebug: boolean;
   // 手续费
-  sellFeePercent: number;
+  sellFeeTiers: SellFeeTier[];
   // 精度控制
   precisionInteger: boolean;
   // 宏观调控 — 固定更新时间
@@ -137,6 +144,9 @@ export interface Config {
   fixedUpdateHour: number;
   // 宏观调控 — 期望偏倚最大值
   biasMax: number;
+  // 分红机制
+  dividendIntervalDays: number;
+  maxDividendRate: number;
 }
 
 export const Config: Schema<Config> = Schema.intersect([
@@ -193,12 +203,22 @@ export const Config: Schema<Config> = Schema.intersect([
   }).description("冻结机制"),
 
   Schema.object({
-    sellFeePercent: Schema.number()
-      .min(0)
-      .max(100)
-      .step(0.01)
-      .default(0)
-      .description("卖出手续费（%）"),
+    sellFeeTiers: Schema.array(
+      Schema.object({
+        minAmount: Schema.number()
+          .min(1)
+          .step(1)
+          .description("起始股数（含）"),
+        feePercent: Schema.number()
+          .min(0)
+          .max(100)
+          .step(0.01)
+          .description("手续费比例（%）"),
+      }),
+    )
+      .role("table")
+      .default([{ minAmount: 1, feePercent: 0 }])
+      .description("卖出手续费分档（按股数越大费率越低匹配）"),
     precisionInteger: Schema.boolean()
       .default(false)
       .description("是否将所有计数精度设置为整数"),
@@ -223,6 +243,20 @@ export const Config: Schema<Config> = Schema.intersect([
   }).description("宏观调控高级设置"),
 
   Schema.object({
+    dividendIntervalDays: Schema.number()
+      .min(1)
+      .step(1)
+      .default(7)
+      .description("分红结算周期（天）"),
+    maxDividendRate: Schema.number()
+      .min(0)
+      .max(1)
+      .step(0.01)
+      .default(0.15)
+      .description("最大分红期望利润率（0-1，超出部分用于除息而非派发）"),
+  }).description("分红机制"),
+
+  Schema.object({
     enableDebug: Schema.boolean()
       .default(false)
       .description("启用调试模式（开启后可使用调试指令）"),
@@ -238,6 +272,7 @@ export function apply(ctx: Context, config: Config) {
     {
       id: "unsigned",
       userId: "string",
+      uid: "unsigned",
       stockId: "string",
       amount: "integer",
       totalCost: "double", // 买入总成本
@@ -284,6 +319,7 @@ export function apply(ctx: Context, config: Config) {
       mode: "string",
       endTime: "timestamp",
       marketOpenStatus: "string",
+      lastDividendDate: "timestamp",
     },
     { primary: "key" },
   );
@@ -320,6 +356,106 @@ export function apply(ctx: Context, config: Config) {
         time: new Date(),
       });
     }
+
+    // 迁移：为旧持仓记录填充 uid（分红派发必需）
+    const allHoldings = await ctx.database.get("bourse_holding", {});
+    const withoutUid = allHoldings.filter((h) => !h.uid);
+    if (withoutUid.length > 0) {
+      logger.info(
+        `迁移: 发现 ${withoutUid.length} 条持仓记录缺少 uid，开始修复...`,
+      );
+      // 第一来源：bourse_pending 表有直接的 userId -> uid 映射
+      const allPending = await ctx.database.get("bourse_pending", {});
+      const uidMap = new Map<string, number>();
+      for (const p of allPending) {
+        if (p.userId && p.uid && !uidMap.has(p.userId)) {
+          uidMap.set(p.userId, p.uid);
+        }
+      }
+      // 第二来源：尝试 Koishi user 表建立 id 映射
+      const userTableUidMap = new Map<string, number>();
+      try {
+        const userTable = ctx.database.tables;
+        if (userTable && "user" in userTable) {
+          const allUsers = await ctx.database.get("user", {});
+          for (const u of allUsers) {
+            if (u.id !== undefined && u.id !== null) {
+              const strId = String(u.id);
+              // 直接按字符串 userId 映射
+              if (!userTableUidMap.has(strId)) {
+                userTableUidMap.set(strId, Number(u.id));
+              }
+            }
+          }
+        }
+      } catch {
+        // user 表不可用则跳过
+      }
+      let fixed = 0;
+      for (const h of withoutUid) {
+        // 第一优先：pending 映射
+        const pendingUid = uidMap.get(h.userId);
+        if (pendingUid) {
+          await ctx.database.set(
+            "bourse_holding",
+            { userId: h.userId, stockId },
+            { uid: pendingUid },
+          );
+          fixed++;
+          continue;
+        }
+        // 第二优先：user 表映射（userId -> id）
+        let userUid = userTableUidMap.get(h.userId);
+        if (!userUid) {
+          // 尝试 userId 中的尾部数字匹配
+          const numMatch = h.userId.match(/(\d+)$/);
+          if (numMatch) {
+            userUid = userTableUidMap.get(numMatch[1]);
+          }
+        }
+        if (userUid) {
+          await ctx.database.set(
+            "bourse_holding",
+            { userId: h.userId, stockId },
+            { uid: userUid },
+          );
+          fixed++;
+          continue;
+        }
+        // 第三优先：尝试用 userId 的尾部数字作为 uid（部分平台 uid 即数字 userId）
+        const numericMatch = h.userId.match(/(\d+)$/);
+        const candidateUid = numericMatch ? Number(numericMatch[1]) : null;
+        if (candidateUid && candidateUid > 0) {
+          // 验证该 uid 在 monetary 表中是否有记录
+          try {
+            const monRecords = await ctx.database.get("monetary", {
+              uid: candidateUid,
+              currency: config.currency,
+            });
+            if (monRecords.length > 0) {
+              await ctx.database.set(
+                "bourse_holding",
+                { userId: h.userId, stockId },
+                { uid: candidateUid },
+              );
+              fixed++;
+              logger.info(
+                `迁移: 通过 userId 尾部数字推断 uid=${candidateUid} -> userId=${h.userId}`,
+              );
+              continue;
+            }
+          } catch {
+            // 查询失败继续下一个策略
+          }
+        }
+        logger.warn(
+          `迁移: 无法为用户 ${h.userId} 解析 uid，将在首次买入时自动修复`,
+        );
+      }
+      if (fixed > 0) {
+        logger.info(`迁移: 成功修复 ${fixed}/${withoutUid.length} 条记录`);
+      }
+    }
   });
 
   // 追踪市场开市状态，用于在开市时切换K线模型
@@ -344,6 +480,7 @@ export function apply(ctx: Context, config: Config) {
       if (!isOpen) return;
       await updatePrice();
       await processPendingTransactions();
+      await checkAndExecuteDividend();
 
       // 清理一个月前的记录
       const oneMonthAgo = new Date(Date.now() - 30 * 24 * 3600 * 1000);
@@ -981,6 +1118,7 @@ export function apply(ctx: Context, config: Config) {
         if (holding.length === 0) {
           await ctx.database.create("bourse_holding", {
             userId: txn.userId,
+            uid: txn.uid,
             stockId,
             amount: txn.amount,
             totalCost: fmtAmount(txn.cost),
@@ -1004,6 +1142,7 @@ export function apply(ctx: Context, config: Config) {
             {
               amount: holding[0].amount + txn.amount,
               totalCost: newTotalCost,
+              uid: txn.uid, // 确保 uid 始终是最新的
             },
           );
         }
@@ -1035,6 +1174,174 @@ export function apply(ctx: Context, config: Config) {
       }
       await ctx.database.remove("bourse_pending", { id: txn.id });
     }
+  }
+
+  // --- 分红除息引擎 ---
+
+  async function checkAndExecuteDividend() {
+    const now = __testNow ?? new Date();
+
+    // 获取宏观状态
+    let state = (
+      await ctx.database.get("bourse_state", { key: "macro_state" })
+    )[0];
+
+    // Rule 1: 时间校验
+    if (state && state.lastDividendDate) {
+      const lastDate = new Date(state.lastDividendDate);
+      const elapsed = now.getTime() - lastDate.getTime();
+      const intervalMs = config.dividendIntervalDays * 24 * 3600 * 1000;
+      if (elapsed < intervalMs) return;
+    } else {
+      // 首次运行：初始化分红时间戳，等待第一个周期
+      if (!state) {
+        await ctx.database.create("bourse_state", {
+          key: "macro_state",
+          lastCycleStart: new Date(Date.now() - 7 * 24 * 3600 * 1000),
+          startPrice: currentPrice,
+          targetPrice: currentPrice,
+          trendFactor: 0,
+          mode: "auto",
+          endTime: new Date(Date.now() + 7 * 24 * 3600 * 1000),
+          lastDividendDate: now,
+        });
+      } else {
+        await ctx.database.set(
+          "bourse_state",
+          { key: "macro_state" },
+          { lastDividendDate: now },
+        );
+      }
+      logger.info("分红引擎: 首次初始化，将在下个周期执行首次分红");
+      return;
+    }
+
+    // Rule 2: 数据聚合与防零除
+    const allHoldings = await ctx.database.get("bourse_holding", {});
+    const totalHoldings = allHoldings.reduce((sum, h) => sum + h.amount, 0);
+    if (allHoldings.length === 0 || totalHoldings === 0) {
+      await ctx.database.set(
+        "bourse_state",
+        { key: "macro_state" },
+        { lastDividendDate: now },
+      );
+      logger.info("分红引擎: 无持仓记录，跳过本次分红");
+      return;
+    }
+
+    // 计算 EDPR（分红期望利润率）
+    const totalMarketValue = fmtAmount(totalHoldings * currentPrice);
+    const totalCost = fmtAmount(
+      allHoldings.reduce((sum, h) => sum + (h.totalCost || 0), 0),
+    );
+    const totalProfit = fmtAmount(totalMarketValue - totalCost);
+    const edpr = totalMarketValue > 0 ? totalProfit / totalMarketValue : 0;
+
+    // Rule 3: 亏损不分红拦截
+    if (edpr <= 0) {
+      await ctx.database.set(
+        "bourse_state",
+        { key: "macro_state" },
+        { lastDividendDate: now },
+      );
+      logger.info(
+        `分红引擎: 大盘亏损（EDPR=${(edpr * 100).toFixed(2)}%），跳过本次分红`,
+      );
+      return;
+    }
+
+    // Rule 4 & 5: 不对称分红与除息
+    const priceDropRate = edpr; // 股价跌幅=EDPR（全量）
+    const effectiveDividendRate = Math.min(edpr, config.maxDividendRate); // 派息率=min(EDPR, 上限)
+
+    logger.info(
+      `分红引擎: 开始执行分红 | EDPR=${(edpr * 100).toFixed(2)}% | ` +
+        `除息跌幅=${(priceDropRate * 100).toFixed(2)}% | ` +
+        `实际派息率=${(effectiveDividendRate * 100).toFixed(2)}% | ` +
+        `持仓人数=${allHoldings.length} | 总股数=${totalHoldings}`,
+    );
+
+    // 派发资金给每个持仓用户
+    let totalDividendPaid = 0;
+    let successCount = 0;
+    let failCount = 0;
+    for (const holding of allHoldings) {
+      const dividendAmount = fmtAmount(
+        holding.amount * effectiveDividendRate * currentPrice,
+      );
+      if (dividendAmount <= 0) continue;
+
+      if (!holding.uid) {
+        logger.warn(
+          `分红引擎: 用户 ${holding.userId} 缺少 uid，无法派发分红 ${dividendAmount.toFixed(2)}`,
+        );
+        failCount++;
+        continue;
+      }
+
+      const success = await changeCashBalance(
+        holding.uid,
+        config.currency,
+        dividendAmount,
+      );
+      if (success) {
+        totalDividendPaid += dividendAmount;
+        successCount++;
+      } else {
+        logger.warn(
+          `分红引擎: 用户 ${holding.userId} (uid=${holding.uid}) 分红派发失败`,
+        );
+        failCount++;
+      }
+    }
+
+    // 除息降价
+    const oldPrice = currentPrice;
+    currentPrice = fmtPrice(currentPrice * (1 - priceDropRate));
+    if (currentPrice < 1) currentPrice = 1;
+
+    // 写入除息行情记录
+    await ctx.database.create("bourse_history", {
+      stockId,
+      price: currentPrice,
+      time: now,
+    });
+
+    // 重置宏观状态：覆盖 startPrice 为目标价格重新计算提供正确基准
+    const fluctuation = 0.25;
+    const targetRatio = 1 + (Math.random() * 2 - 1) * fluctuation;
+    let newTargetPrice = currentPrice * targetRatio;
+    newTargetPrice = Math.max(
+      currentPrice * 0.5,
+      Math.min(currentPrice * 1.5, newTargetPrice),
+    );
+
+    let newEndTime: Date;
+    if (config.fixedUpdateTime) {
+      newEndTime = new Date(now);
+      newEndTime.setHours(config.fixedUpdateHour, 0, 0, 0);
+      if (newEndTime <= now) newEndTime.setDate(newEndTime.getDate() + 1);
+    } else {
+      newEndTime = new Date(now.getTime() + 7 * 24 * 3600 * 1000);
+    }
+
+    await ctx.database.set("bourse_state", { key: "macro_state" }, {
+      startPrice: currentPrice,
+      targetPrice: fmtPrice(newTargetPrice),
+      lastCycleStart: now,
+      endTime: newEndTime,
+      lastDividendDate: now,
+    });
+
+    // 切换 K 线走势
+    switchKLinePattern("分红除息");
+
+    logger.info(
+      `分红引擎: 执行完毕 | 除息前股价=${oldPrice} -> 除息后=${currentPrice} ` +
+        `(${(-priceDropRate * 100).toFixed(2)}%) | ` +
+        `派发成功=${successCount}人 | 失败=${failCount}人 | ` +
+        `合计派发=${totalDividendPaid.toFixed(2)} ${config.currency}`,
+    );
   }
 
   // 统一获取价格历史，便于渲染成交/挂单回单

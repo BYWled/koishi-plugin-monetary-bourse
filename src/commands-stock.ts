@@ -1,10 +1,19 @@
 import type { Context, Logger } from "koishi";
-import type { BourseHistory, Config } from "./index";
+import type { BourseHistory, Config, SellFeeTier } from "./index";
 import type { KLineOptions, PricePoint } from "./render";
 
 type RenderStockImage = typeof import("./render").renderStockImage;
 type RenderTradeResultImage = typeof import("./render").renderTradeResultImage;
 type RenderHoldingImage = typeof import("./render").renderHoldingImage;
+
+function resolveSellFeePercent(amount: number, tiers: SellFeeTier[]): number {
+  if (!Array.isArray(tiers) || tiers.length === 0) return 0;
+  const sorted = [...tiers].sort((a, b) => b.minAmount - a.minAmount);
+  const matched = sorted.find((tier) => amount >= tier.minAmount);
+  if (!matched) return 0;
+  const percent = Number.isFinite(matched.feePercent) ? matched.feePercent : 0;
+  return Math.min(100, Math.max(0, percent));
+}
 
 type StockCommandDeps = {
   ctx: Context;
@@ -433,7 +442,7 @@ export function registerStockCommands(deps: StockCommandDeps) {
       }
 
       const gain = fmtAmount(currentPrice * amount);
-      const feePercent = config.sellFeePercent;
+      const feePercent = resolveSellFeePercent(amount, config.sellFeeTiers);
       const fee = feePercent > 0 ? fmtAmount((gain * feePercent) / 100) : 0;
       const netGain = fmtAmount(gain - fee);
       let freezeMinutes = 0;

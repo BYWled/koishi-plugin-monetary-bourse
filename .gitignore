@@ -13,7 +13,9 @@ tsconfig.tsbuildinfo
 .DS_Store
 .idea
 .vscode
+.claude
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
+~
