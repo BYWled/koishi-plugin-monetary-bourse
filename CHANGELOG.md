@@ -4,9 +4,15 @@
 
 ## [3.0.0]
 
+### [Alpha.18]
+
+#### 🐛 Bug Fixes (修复)
+
+- **version**: Git版本号与Npm版本号不一致的问题。
+
 ### [Alpha.17]
 
-#### Bug Fixes
+#### 🐛 Bug Fixes (修复)
 
 - **render**: 修复模板目录解析在 Koishi/CJS 环境下触发 `Invalid URL` 的问题。
 - **render**: 修复读取本地 G2 脚本失败导致的 `ENOENT` 报错。
