@@ -1,12 +1,8 @@
 import { Context, h, Logger } from "koishi";
 import { resolve } from "path";
 import { promises as fs } from "fs";
-import { fileURLToPath } from "url";
 
-const templatesDir = resolve(
-  fileURLToPath(new URL(".", import.meta.url)),
-  "templates",
-);
+const templatesDir = resolve(__dirname, "templates");
 
 export type PricePoint = {
   time: string;
@@ -193,14 +189,6 @@ export async function renderStockImage(
 
     const templatePath = resolve(templatesDir, "stock-chart.html");
     let html = await fs.readFile(templatePath, "utf-8");
-    const g2Path = resolve(templatesDir, "g2.min.js");
-    let g2Script = "";
-    try {
-      g2Script = await fs.readFile(g2Path, "utf-8");
-      g2Script = g2Script.replace(/<\/script>/g, "<\\/script>");
-    } catch (err) {
-      logger.warn(`renderStockImage: failed to read local G2 script: ${g2Path}`, err);
-    }
 
     const colorScheme = {
       mainColor: isUp ? "#f23645" : "#089981",
@@ -246,7 +234,7 @@ export async function renderStockImage(
       "{{TIMES}}": JSON.stringify(data.map((d) => d.time)),
       "{{TIMESTAMPS}}": JSON.stringify(data.map((d) => d.timestamp)),
       "{{KLINE_DATA}}": JSON.stringify(klineData),
-      "{{G2_SCRIPT}}": g2Script,
+      "{{G2_SCRIPT}}": "",
     };
 
     for (const [key, value] of Object.entries(replacements)) {

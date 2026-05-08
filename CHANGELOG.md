@@ -4,6 +4,14 @@
 
 ## [3.0.0]
 
+### [Alpha.17]
+
+#### Bug Fixes
+
+- **render**: 修复模板目录解析在 Koishi/CJS 环境下触发 `Invalid URL` 的问题。
+- **render**: 修复读取本地 G2 脚本失败导致的 `ENOENT` 报错。
+- **chart**: 修复图表日志中仍残留本地 G2 脚本读取告警的问题。
+
 ### [Alpha.16]
 
 #### ✨ Features (新特性)
