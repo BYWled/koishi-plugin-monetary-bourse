@@ -6,7 +6,7 @@
 
 本插件模拟了一个具备自动宏观调控、25种经典K线形态、智能概率博弈和可视化交割单的深度拟真股票市场。用户可以使用机器人通用的货币（如信用点）进行股票买卖、炒股理财。
 
-> 版本：**3.0.0-alpha.18**
+> 版本：**3.0.0-alpha.19**
 
 ## ✨ 特性
 
@@ -129,6 +129,8 @@ A: 股价采用 **"智能期望模型"** 驱动，更贴近真实博弈：
 ### 交易时间
 - **openHour**: 每日开市时间（小时，0-23，默认 `8` 点）。
 - **closeHour**: 每日休市时间（小时，0-23，默认 `23` 点）。
+
+### 股市开关
 - **marketStatus**: 股市总开关，可选 `open` (强制开启)、`close` (强制关闭)、`auto` (自动按时间)。
 
 ### 冻结机制
@@ -137,7 +139,9 @@ A: 股价采用 **"智能期望模型"** 驱动，更贴近真实博弈：
 - **maxFreezeTime**: 最大冻结时间（分钟，默认 `1440` 即24小时）。
 
 ### 手续费与精度
-- **sellFeePercent**: 卖出手续费百分比（默认 `0`）。
+- **sellFeeTiers**: 卖出手续费分档列表（默认 `[{ minAmount: 1, feePercent: 0 }]`）。
+  - **minAmount**: 起始股数（含）。
+  - **feePercent**: 手续费比例（%）。
 - **precisionInteger**: 是否启用整数精度（默认 `false`）。
 
 ### 开发者选项
@@ -147,6 +151,44 @@ A: 股价采用 **"智能期望模型"** 驱动，更贴近真实博弈：
 - **fixedUpdateTime**: 是否固定宏观目标的更新时间（默认 `false`）。
 - **fixedUpdateHour**: 固定更新时间（小时，0-23，默认 `9`）。仅在 `fixedUpdateTime` 为 `true` 时生效。
 - **biasMax**: 宏观期望上下偏倚的最大值（默认 `0.45`）。
+
+### 分红机制
+- **dividendIntervalDays**: 分红结算周期（天，默认 `7`）。
+- **maxDividendRate**: 最大分红期望利润率（0-1，默认 `0.15`，超出部分用于除息而非派发）。
+
+### 新闻播报机制
+- **newsDeviationThreshold**: 触发新闻的偏离度阈值（默认 `0.15`，例如 `0.15` 表示偏离 15% 以上触发）。
+- **broadcastChannels**: 播报新闻的频道/群聊 ID 列表（为空则仅后台日志，不发送群消息）。
+- **positiveNews**: 利好新闻列表（表格配置）。
+- **negativeNews**: 利空新闻列表（表格配置）。
+  - **text**: 新闻文本，可使用 `{stockName}` 作为股票名称占位符。
+  - **weight**: 权重（整数，最小 `1`，数值越大越容易被选中）。
+
+### 开发者选项
+- **enableDebug**: 是否启用调试模式（默认 `false`）。开启后可使用 `bourse.test.*` 系列调试指令。
+
+### 配置示例
+```yaml
+sellFeeTiers:
+  - minAmount: 1
+    feePercent: 0.6
+  - minAmount: 200
+    feePercent: 0.3
+
+newsDeviationThreshold: 0.15
+broadcastChannels:
+  - "123456789"
+positiveNews:
+  - text: "【财经快讯】{stockName} 宣布取得重大技术突破，预期利润大增！"
+    weight: 3
+  - text: "【市场异动】神秘巨头入局，{stockName} 获大额资本注资！"
+    weight: 1
+negativeNews:
+  - text: "【黑天鹅】{stockName} 遭遇大规模不可抗力打击，市场恐慌情绪蔓延！"
+    weight: 2
+  - text: "【行业悲报】{stockName} 最新季度财报严重不及预期，高管集体减持！"
+    weight: 1
+```
 
 ## 📝 更新日志
 

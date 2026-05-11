@@ -14,6 +14,7 @@ type AdminCommandDeps = {
     expectedPrice?: number,
     cycleProgress?: number,
   ) => void;
+  broadcastMacroNews: (targetPrice: number, basePrice: number) => Promise<void>;
 };
 
 export function registerAdminCommands(deps: AdminCommandDeps) {
@@ -26,6 +27,7 @@ export function registerAdminCommands(deps: AdminCommandDeps) {
     setWasMarketOpen,
     isMarketOpen,
     switchKLinePattern,
+    broadcastMacroNews,
   } = deps;
 
   ctx
@@ -79,6 +81,9 @@ export function registerAdminCommands(deps: AdminCommandDeps) {
           updateFields,
         );
       }
+
+      // 若偏离度超过阈值，播报宏观新闻
+      await broadcastMacroNews(targetPriceClamped, currentPrice);
 
       const hint =
         targetPriceClamped !== price

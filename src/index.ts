@@ -119,6 +119,11 @@ export type SellFeeTier = {
   feePercent: number;
 };
 
+export type NewsItem = {
+  text: string;
+  weight: number;
+};
+
 export interface Config {
   currency: string;
   stockName: string;
@@ -147,6 +152,11 @@ export interface Config {
   // 分红机制
   dividendIntervalDays: number;
   maxDividendRate: number;
+  // 新闻播报机制
+  newsDeviationThreshold: number;
+  broadcastChannels: string[];
+  positiveNews: NewsItem[];
+  negativeNews: NewsItem[];
 }
 
 export const Config: Schema<Config> = Schema.intersect([
@@ -205,10 +215,7 @@ export const Config: Schema<Config> = Schema.intersect([
   Schema.object({
     sellFeeTiers: Schema.array(
       Schema.object({
-        minAmount: Schema.number()
-          .min(1)
-          .step(1)
-          .description("起始股数（含）"),
+        minAmount: Schema.number().min(1).step(1).description("起始股数（含）"),
         feePercent: Schema.number()
           .min(0)
           .max(100)
@@ -255,6 +262,58 @@ export const Config: Schema<Config> = Schema.intersect([
       .default(0.15)
       .description("最大分红期望利润率（0-1，超出部分用于除息而非派发）"),
   }).description("分红机制"),
+
+  Schema.object({
+    newsDeviationThreshold: Schema.number()
+      .min(0.05)
+      .max(1)
+      .step(0.01)
+      .default(0.15)
+      .description(
+        "触发新闻的偏离度阈值（例如 0.15 表示当新目标价与当前价相差 15% 以上时触发）",
+      ),
+    broadcastChannels: Schema.array(Schema.string())
+      .default([])
+      .description(
+        "播报新闻的频道/群聊 ID 列表（为空则只在后台输出日志，不发送群消息）",
+      ),
+    positiveNews: Schema.array(
+      Schema.object({
+        text: Schema.string().description("新闻文本"),
+        weight: Schema.number().min(1).step(1).default(1).description("权重"),
+      }),
+    )
+      .role("table")
+      .default([
+        {
+          text: "【财经快讯】{stockName} 宣布取得重大技术突破，预期利润大增！",
+          weight: 1,
+        },
+        {
+          text: "【市场异动】神秘巨头入局，{stockName} 获大额资本注资！",
+          weight: 1,
+        },
+      ])
+      .description("利好新闻列表（可用 {stockName} 作为股票名称的占位符）"),
+    negativeNews: Schema.array(
+      Schema.object({
+        text: Schema.string().description("新闻文本"),
+        weight: Schema.number().min(1).step(1).default(1).description("权重"),
+      }),
+    )
+      .role("table")
+      .default([
+        {
+          text: "【黑天鹅】{stockName} 遭遇大规模不可抗力打击，市场恐慌情绪蔓延！",
+          weight: 1,
+        },
+        {
+          text: "【行业悲报】{stockName} 最新季度财报严重不及预期，高管集体减持！",
+          weight: 1,
+        },
+      ])
+      .description("利空新闻列表（可用 {stockName} 作为股票名称的占位符）"),
+  }).description("新闻播报机制"),
 
   Schema.object({
     enableDebug: Schema.boolean()
@@ -783,6 +842,44 @@ export function apply(ctx: Context, config: Config) {
     return { success: true };
   }
 
+  // --- 新闻播报辅助函数 ---
+
+  async function broadcastMacroNews(targetPrice: number, basePrice: number) {
+    const deviation = (targetPrice - basePrice) / basePrice;
+
+    if (Math.abs(deviation) < config.newsDeviationThreshold) return;
+
+    const newsPool = deviation > 0 ? config.positiveNews : config.negativeNews;
+    if (!newsPool || newsPool.length === 0) return;
+
+    const totalWeight = newsPool.reduce((sum, item) => sum + item.weight, 0);
+    if (totalWeight <= 0) return;
+
+    let roll = Math.random() * totalWeight;
+    let selected = newsPool[newsPool.length - 1];
+    for (const item of newsPool) {
+      roll -= item.weight;
+      if (roll < 0) {
+        selected = item;
+        break;
+      }
+    }
+
+    const newsText = selected.text.replace(/\{stockName\}/g, config.stockName);
+
+    logger.info(
+      `触发宏观新闻播报: ${newsText} (偏离度=${(deviation * 100).toFixed(2)}%)`,
+    );
+
+    if (config.broadcastChannels && config.broadcastChannels.length > 0) {
+      try {
+        await ctx.broadcast(config.broadcastChannels, newsText);
+      } catch (err) {
+        logger.warn(`新闻播报广播失败:`, err);
+      }
+    }
+  }
+
   // --- 宏观调控逻辑 ---
 
   // 按分类索引模型
@@ -978,6 +1075,8 @@ export function apply(ctx: Context, config: Config) {
 
     if (needNewState) {
       await createAutoState();
+      // 新周期生成时，若目标偏离度超过阈值则播报新闻
+      await broadcastMacroNews(state.targetPrice, currentPrice);
     }
 
     // --- 基础参数 ---
@@ -1325,13 +1424,17 @@ export function apply(ctx: Context, config: Config) {
       newEndTime = new Date(now.getTime() + 7 * 24 * 3600 * 1000);
     }
 
-    await ctx.database.set("bourse_state", { key: "macro_state" }, {
-      startPrice: currentPrice,
-      targetPrice: fmtPrice(newTargetPrice),
-      lastCycleStart: now,
-      endTime: newEndTime,
-      lastDividendDate: now,
-    });
+    await ctx.database.set(
+      "bourse_state",
+      { key: "macro_state" },
+      {
+        startPrice: currentPrice,
+        targetPrice: fmtPrice(newTargetPrice),
+        lastCycleStart: now,
+        endTime: newEndTime,
+        lastDividendDate: now,
+      },
+    );
 
     // 切换 K 线走势
     switchKLinePattern("分红除息");
@@ -1403,6 +1506,7 @@ export function apply(ctx: Context, config: Config) {
     setWasMarketOpen,
     isMarketOpen,
     switchKLinePattern,
+    broadcastMacroNews,
   });
 
   registerTestCommands({
