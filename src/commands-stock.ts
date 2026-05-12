@@ -1,6 +1,7 @@
 import type { Context, Logger } from "koishi";
 import type { BourseHistory, Config, SellFeeTier } from "./index";
 import type { KLineOptions, PricePoint } from "./render";
+import { buildHoldingSummary } from "./utils/holding-summary";
 
 type RenderStockImage = typeof import("./render").renderStockImage;
 type RenderTradeResultImage = typeof import("./render").renderTradeResultImage;
@@ -477,6 +478,7 @@ export function registerStockCommands(deps: StockCommandDeps) {
         amount,
         price: currentPrice,
         cost: netGain,
+        buyCost: soldCost,
         startTime,
         endTime,
       });
@@ -574,31 +576,34 @@ export function registerStockCommands(deps: StockCommandDeps) {
 
       let holdingData = null;
       const currentPrice = getCurrentPrice();
-      if (holdings.length > 0) {
-        const h = holdings[0];
-        const marketValue = fmtAmount(h.amount * currentPrice);
-        const hasCostData =
-          h.totalCost !== undefined && h.totalCost !== null && h.totalCost > 0;
-        const totalCost = hasCostData ? fmtAmount(h.totalCost) : 0;
-        const avgCost =
-          hasCostData && h.amount > 0
-            ? fmtPrice(totalCost / h.amount)
-            : 0;
-        const profit = hasCostData ? fmtAmount(marketValue - totalCost) : null;
-        const profitPercent =
-          hasCostData && totalCost > 0
-            ? Number(((profit / totalCost) * 100).toFixed(2))
-            : null;
+      const summary = buildHoldingSummary({
+        currentPrice,
+        holding: holdings.length
+          ? { amount: holdings[0].amount, totalCost: holdings[0].totalCost }
+          : null,
+        pending: pending.map((p) => ({
+          type: p.type,
+          amount: p.amount,
+          price: p.price,
+          cost: p.cost,
+          buyCost: p.buyCost ?? null,
+        })),
+      });
 
+      if (summary) {
         holdingData = {
           stockName: config.stockName,
-          amount: h.amount,
+          amount: summary.amount,
           currentPrice: fmtPrice(currentPrice),
-          avgCost: hasCostData ? avgCost : null,
-          totalCost: hasCostData ? totalCost : null,
-          marketValue,
-          profit,
-          profitPercent,
+          avgCost: summary.hasCostData ? fmtPrice(summary.avgCost!) : null,
+          totalCost: summary.hasCostData
+            ? fmtAmount(summary.totalCost!)
+            : null,
+          marketValue: fmtAmount(summary.marketValue),
+          profit: summary.hasCostData ? fmtAmount(summary.profit!) : null,
+          profitPercent: summary.hasCostData
+            ? Number(summary.profitPercent!.toFixed(2))
+            : null,
         };
       }
 

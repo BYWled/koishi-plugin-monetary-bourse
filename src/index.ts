@@ -6,6 +6,7 @@ import {
   renderTradeResultImage,
   renderStockImage,
 } from "./render";
+import { chunkLines, parseChannelTarget } from "./utils/broadcast";
 import { PatternCategory, kLinePatterns } from "./pattern";
 import { registerAdminCommands } from "./commands-admin";
 import { registerStockCommands } from "./commands-stock";
@@ -67,6 +68,7 @@ export interface BoursePending {
   amount: number;
   price: number; // 交易时的单价
   cost: number; // 总成本或总收益
+  buyCost?: number; // 卖出挂单的买入成本
   startTime: Date;
   endTime: Date;
 }
@@ -152,6 +154,7 @@ export interface Config {
   // 分红机制
   dividendIntervalDays: number;
   maxDividendRate: number;
+  dividendBroadcastChannels: string[];
   // 新闻播报机制
   newsDeviationThreshold: number;
   broadcastChannels: string[];
@@ -264,6 +267,12 @@ export const Config: Schema<Config> = Schema.intersect([
   }).description("分红机制"),
 
   Schema.object({
+    dividendBroadcastChannels: Schema.array(Schema.string())
+      .default([])
+      .description("分红播报的频道/群聊 ID 列表（支持 onebot:123 或 123）"),
+  }).description("分红播报"),
+
+  Schema.object({
     newsDeviationThreshold: Schema.number()
       .min(0.05)
       .max(1)
@@ -350,6 +359,7 @@ export function apply(ctx: Context, config: Config) {
       amount: "integer",
       price: "double",
       cost: "double",
+      buyCost: "double",
       startTime: "timestamp",
       endTime: "timestamp",
     },
@@ -844,6 +854,33 @@ export function apply(ctx: Context, config: Config) {
 
   // --- 新闻播报辅助函数 ---
 
+  async function sendBroadcast(
+    channels: string[],
+    message: string,
+    label: string,
+  ) {
+    if (!channels || channels.length === 0) return;
+    for (const raw of channels) {
+      const target = parseChannelTarget(raw);
+      if (!target) {
+        logger.warn(`${label}: 无效频道配置 ${raw}`);
+        continue;
+      }
+      const bot = target.platform
+        ? ctx.bots.find((b) => b.platform === target.platform)
+        : ctx.bots[0];
+      if (!bot) {
+        logger.warn(`${label}: 未找到可用 bot (${raw})`);
+        continue;
+      }
+      try {
+        await bot.sendMessage(target.channelId, message);
+      } catch (err) {
+        logger.warn(`${label}: 发送失败 channel=${raw}`, err);
+      }
+    }
+  }
+
   async function broadcastMacroNews(targetPrice: number, basePrice: number) {
     const deviation = (targetPrice - basePrice) / basePrice;
 
@@ -871,13 +908,7 @@ export function apply(ctx: Context, config: Config) {
       `触发宏观新闻播报: ${newsText} (偏离度=${(deviation * 100).toFixed(2)}%)`,
     );
 
-    if (config.broadcastChannels && config.broadcastChannels.length > 0) {
-      try {
-        await ctx.broadcast(config.broadcastChannels, newsText);
-      } catch (err) {
-        logger.warn(`新闻播报广播失败:`, err);
-      }
-    }
+    await sendBroadcast(config.broadcastChannels, newsText, "新闻播报");
   }
 
   // --- 宏观调控逻辑 ---
@@ -1364,6 +1395,7 @@ export function apply(ctx: Context, config: Config) {
     let totalDividendPaid = 0;
     let successCount = 0;
     let failCount = 0;
+    const successRecords: { userId: string; amount: number }[] = [];
     for (const holding of allHoldings) {
       const dividendAmount = fmtAmount(
         holding.amount * effectiveDividendRate * currentPrice,
@@ -1386,11 +1418,44 @@ export function apply(ctx: Context, config: Config) {
       if (success) {
         totalDividendPaid += dividendAmount;
         successCount++;
+        successRecords.push({ userId: holding.userId, amount: dividendAmount });
       } else {
         logger.warn(
           `分红引擎: 用户 ${holding.userId} (uid=${holding.uid}) 分红派发失败`,
         );
         failCount++;
+      }
+    }
+
+    if (
+      config.dividendBroadcastChannels &&
+      config.dividendBroadcastChannels.length > 0 &&
+      successCount > 0
+    ) {
+      const summary =
+        `【分红播报】参与人数: ${successCount} | ` +
+        `派息率: ${(effectiveDividendRate * 100).toFixed(2)}% | ` +
+        `总派息: ${totalDividendPaid.toFixed(2)} ${config.currency}`;
+      await sendBroadcast(
+        config.dividendBroadcastChannels,
+        summary,
+        "分红播报",
+      );
+
+      const detailLines = successRecords.map((record) => {
+        const ratio =
+          totalDividendPaid > 0
+            ? (record.amount / totalDividendPaid) * 100
+            : 0;
+        return `- ${record.userId}：占比 ${ratio.toFixed(2)}% | ${record.amount.toFixed(2)} ${config.currency}`;
+      });
+
+      for (const chunk of chunkLines("【分红明细】", detailLines, 10)) {
+        await sendBroadcast(
+          config.dividendBroadcastChannels,
+          chunk,
+          "分红明细",
+        );
       }
     }
 

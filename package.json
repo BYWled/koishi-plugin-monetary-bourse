@@ -1,6 +1,6 @@
 {
   "name": "koishi-plugin-monetary-bourse",
-  "version": "3.0.0-alpha.19",
+  "version": "3.0.0-alpha.20",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
   "files": [
@@ -8,7 +8,11 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc && node -e \"require('fs').cpSync('src/templates', 'lib/templates', {recursive: true})\""
+    "build": "tsc && node -e \"require('fs').cpSync('src/templates', 'lib/templates', {recursive: true})\"",
+    "test": "node --test --import tsx"
+  },
+  "devDependencies": {
+    "tsx": "^4.7.1"
   },
   "koishi": {
     "description": {
