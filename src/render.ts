@@ -1,8 +1,42 @@
 import { Context, h, Logger } from "koishi";
 import { resolve } from "path";
+import { pathToFileURL } from "url";
 import { promises as fs } from "fs";
 
 const templatesDir = resolve(__dirname, "templates");
+const assetsDir = resolve(__dirname, "..", "assets");
+const assetsBaseUrl = pathToFileURL(assetsDir).toString().replace(/\/$/, "");
+
+function getAssetUrl(relativePath: string): string {
+  return `${assetsBaseUrl}/${relativePath}`;
+}
+
+function getFontFaceCss(): string {
+  const fontRegularUrl = getAssetUrl("fonts/RobotoMono-Regular.ttf");
+  const fontBoldUrl = getAssetUrl("fonts/RobotoMono-Bold.ttf");
+
+  return `
+    @font-face {
+      font-family: 'Roboto Mono';
+      src: url('${fontRegularUrl}') format('truetype');
+      font-weight: 400;
+      font-style: normal;
+      font-display: swap;
+    }
+
+    @font-face {
+      font-family: 'Roboto Mono';
+      src: url('${fontBoldUrl}') format('truetype');
+      font-weight: 700;
+      font-style: normal;
+      font-display: swap;
+    }
+  `;
+}
+
+function injectFontFace(template: string): string {
+  return template.replace("{{FONT_FACE}}", getFontFaceCss());
+}
 
 export type PricePoint = {
   time: string;
@@ -54,6 +88,7 @@ export async function renderHoldingImage(
   try {
     const templatePath = resolve(templatesDir, "holding-card.html");
     let template = await fs.readFile(templatePath, "utf-8");
+    template = injectFontFace(template);
 
     const data = {
       username,
@@ -109,6 +144,7 @@ export async function renderTradeResultImage(
   try {
     const templatePath = resolve(templatesDir, "trade-result.html");
     let template = await fs.readFile(templatePath, "utf-8");
+    template = injectFontFace(template);
 
     const tradeIndex = priceHistory.length - 1;
     const status = tradeMeta?.status ?? "settled";
@@ -189,6 +225,7 @@ export async function renderStockImage(
 
     const templatePath = resolve(templatesDir, "stock-chart.html");
     let html = await fs.readFile(templatePath, "utf-8");
+    html = injectFontFace(html);
 
     const colorScheme = {
       mainColor: isUp ? "#f23645" : "#089981",

@@ -1,12 +1,28 @@
-# koishi-plugin-monetary-bourse
+<h1 align="center">koishi-plugin-monetary-bourse</h1>
 
-[![npm](https://img.shields.io/npm/v/koishi-plugin-monetary-bourse?style=flat-square)](https://www.npmjs.com/package/koishi-plugin-monetary-bourse) [![GitHub stars](https://img.shields.io/github/stars/BYWled/koishi-plugin-monetary-bourse?style=flat-square&logo=github)](https://github.com/BYWled/koishi-plugin-monetary-bourse) [![Gitee](https://img.shields.io/badge/Gitee-Project-c71d23?style=flat-square&logo=gitee&logoColor=white)](https://gitee.com/BYWled/koishi-plugin-monetary-bourse)
+<p align="center">
+	为 Koishi 提供基于 <code>monetary</code> 通用货币系统的股票交易所功能。
+</p>
 
-为 Koishi 提供基于 `monetary` 通用货币系统的股票交易所功能。
+<p align="center">
+	<a href="https://www.npmjs.com/package/koishi-plugin-monetary-bourse"><img src="https://img.shields.io/npm/v/koishi-plugin-monetary-bourse?style=for-the-badge&logo=npm" alt="npm" /></a>
+	<a href="https://github.com/BYWled/koishi-plugin-monetary-bourse"><img src="https://img.shields.io/github/stars/BYWled/koishi-plugin-monetary-bourse?style=for-the-badge&logo=github" alt="GitHub Stars" /></a>
+</p>
+
+<p align="center">
+	<a href="https://gitee.com/BYWled/koishi-plugin-monetary-bourse"><img src="https://img.shields.io/badge/Gitee-代码镜像-C71D23?style=for-the-badge&logo=gitee&logoColor=white" alt="Gitee Mirror" /></a>
+	<a href="https://gitcode.com/BYWled/koishi-plugin-monetary-bourse"><img src="https://img.shields.io/badge/GitCode-代码镜像-2962FF?style=for-the-badge" alt="GitCode Mirror" /></a>
+</p>
+
+<p align="center">
+	<a href="https://github.com/BYWled/koishi-plugin-monetary-bourse">GitHub</a> ·
+	<a href="https://gitee.com/BYWled/koishi-plugin-monetary-bourse">Gitee</a> ·
+	<a href="https://gitcode.com/BYWled/koishi-plugin-monetary-bourse">GitCode</a>
+</p>
 
 本插件模拟了一个具备自动宏观调控、25种经典K线形态、智能概率博弈和可视化交割单的深度拟真股票市场。用户可以使用机器人通用的货币（如信用点）进行股票买卖、炒股理财。
 
-> 版本：**3.0.0-alpha.20**
+> 版本：**3.0.0**
 
 ## ✨ 特性
 
@@ -17,11 +33,15 @@
 - **🖼️ 全可视化交互**：
   - **专业走势图**：复刻 TradingView 风格的深色玻璃拟态 K 线图，包含动态呼吸灯、渐变填充与详细指标。
   - **持仓资产卡片**：精美渲染个人持仓、成本分析、浮动盈亏比及排队中的挂单详情。
-  - **交易交割单**：**(New)** 买卖成交瞬间生成**交易回单图片**，在 K 线图上精确标记买卖点位，直观展示单笔盈亏与买入成本线。
+  - **交易交割单**：买卖成交瞬间生成**交易回单图片**，在 K 线图上精确标记买卖点位，直观展示单笔盈亏与买入成本线。
+  - **内置字体**：使用 Roboto Mono 字体，确保图表中的数字和文本清晰易读。
 - **❄️ 资金冻结与挂单排队**：
   - 交易采用 T+0 机制，但大额资金/股票会根据金额计算**动态冻结时间**。
   - 挂单采用**串行排队模式**，同一用户的多个挂单需依次读秒，防止通过拆单绕过冻结机制，增加博弈深度。
 - **💸 手续费与精度控制**：支持卖出手续费配置，回单展示净到账金额；可开启整数精度模式，适配不支持小数的货币体系。
+- **📊 分红与新闻系统**：
+  - 定期分红：根据持仓占比和预设利润率进行分红，支持分红播报。
+  - 新闻触发：当价格偏离宏观目标超过设定阈值时，自动从利好/利空新闻库中随机选取并播报，增加市场氛围。
 - **🧭 宏观周期固定刷新**：支持固定时刻刷新宏观目标周期，便于在活动时段塑造更清晰的趋势节奏。
 - **🏦 银行联动**：支持与[ `koishi-plugin-monetary-bank`](https://github.com/BYWled/koishi-plugin-monetary-bank)[![npm](https://img.shields.io/npm/v/koishi-plugin-monetary-bank?style=flat-square)](https://www.npmjs.com/package/koishi-plugin-monetary-bank) 联动，现金不足时自动扣除银行活期存款。
 
@@ -196,6 +216,9 @@ negativeNews:
 ## 📝 更新日志
 
 详细的更新日志请查看 [CHANGELOG.md](./CHANGELOG.md)。
+
+## 🙏 第三方资源/致谢
+- Roboto Mono 字体（SIL OPEN FONT LICENSE Version 1.1）：[字体链接](https://fonts.google.com/specimen/Roboto+Mono)
 
 ---
 
