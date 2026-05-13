@@ -7,6 +7,7 @@
 <p align="center">
 	<a href="https://www.npmjs.com/package/koishi-plugin-monetary-bourse"><img src="https://img.shields.io/npm/v/koishi-plugin-monetary-bourse?style=for-the-badge&logo=npm" alt="npm" /></a>
 	<a href="https://github.com/BYWled/koishi-plugin-monetary-bourse"><img src="https://img.shields.io/github/stars/BYWled/koishi-plugin-monetary-bourse?style=for-the-badge&logo=github" alt="GitHub Stars" /></a>
+  <a href="https://github.com/BYWled/koishi-plugin-monetary-bourse/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-blue?style=for-the-badge" alt="GPLv3 License" /></a>
 </p>
 
 <p align="center">
@@ -22,7 +23,7 @@
 
 本插件模拟了一个具备自动宏观调控、25种经典K线形态、智能概率博弈和可视化交割单的深度拟真股票市场。用户可以使用机器人通用的货币（如信用点）进行股票买卖、炒股理财。
 
-> 版本：**3.0.1**
+> 版本：**3.0.2**
 
 ## ✨ 特性
 
@@ -49,6 +50,7 @@
 ## 📦 依赖
 
 本插件需要以下服务：
+
 - `database`: 用于存储持仓、历史行情和挂单记录。
 - `puppeteer`: 用于渲染股市行情图。
 - `monetary`: (可选) 用于获取用户货币余额（本插件直接操作数据库表，monetary 插件需安装以建立表结构）。
@@ -67,14 +69,12 @@
   - 买入股票。
   - 参数 `amount`: 购买股数（整数）。
   - 说明：扣除现金（优先）或银行活期，股票将在冻结时间结束后到账。
-  - *新特性：若无冻结时间（小额或配置设置），将直接返回一张包含买入点位标记的**交易交割单图片**。*
-  
+  - _新特性：若无冻结时间（小额或配置设置），将直接返回一张包含买入点位标记的**交易交割单图片**。_
 - **`stock.sell <amount>`**
   - 卖出股票。
   - 参数 `amount`: 卖出股数（整数）。
   - 说明：扣除持仓，获得的资金将在冻结时间结束后到账。
-  - *新特性：成交后返回**收益结算图**，包含本次交易的盈亏金额、盈亏百分比及买入成本线对比。*
-  
+  - _新特性：成交后返回**收益结算图**，包含本次交易的盈亏金额、盈亏百分比及买入成本线对比。_
 - **`stock.my`**
   - 查看我的账户。
   - 显示当前持仓、市值以及正在进行中（冻结中）的买卖订单。
@@ -86,7 +86,7 @@
   - 说明：强行引导股价在指定时间内向目标价格移动。若目标涨跌超出±50%限幅，会自动调整至限幅边界后再应用。
   - 示例：`stock.control 5000 12` (在12小时内让股价涨/跌到5000)。
 
-- **`stock.pattern`** *(Alpha 2 新增)*
+- **`stock.pattern`** _(Alpha 2 新增)_
   - 强制切换 K 线模型。
   - 说明：手动随机切换当前使用的日内走势剧本（如从“单边下跌”切换为“尾盘拉升”）。
 
@@ -125,7 +125,7 @@ A: 本插件设计了基于交易金额的动态冻结机制。交易额越大�
 
 ---
 
-**Q: 股价是如何波动的？（2.0.0 算法升级）** 
+**Q: 股价是如何波动的？（2.0.0 算法升级）**
 
 A: 股价采用 **"智能期望模型"** 驱动，更贴近真实博弈：
 
@@ -142,45 +142,55 @@ A: 股价采用 **"智能期望模型"** 驱动，更贴近真实博弈：
 可以在控制台插件配置页进行设置：
 
 ### 基础设置
+
 - **currency**: 货币单位名称（默认：`信用点`）。
 - **stockName**: 股票名称（默认：`Koishi股份`）。
 - **initialPrice**: 股票初始价格（默认：`1200`）。
 - **maxHoldings**: 单人最大持仓限制（默认：`100000`）。
 
 ### 交易时间
+
 - **openHour**: 每日开市时间（小时，0-23，默认 `8` 点）。
 - **closeHour**: 每日休市时间（小时，0-23，默认 `23` 点）。
 
 ### 股市开关
+
 - **marketStatus**: 股市总开关，可选 `open` (强制开启)、`close` (强制关闭)、`auto` (自动按时间)。
 
 ### 冻结机制
+
 - **freezeCostPerMinute**: 每多少货币金额计为1分钟冻结时间（默认 `100`）。
 - **minFreezeTime**: 最小冻结时间（分钟，默认 `10`）。
 - **maxFreezeTime**: 最大冻结时间（分钟，默认 `1440` 即24小时）。
 
 ### 手续费与精度
+
 - **sellFeeTiers**: 卖出手续费分档列表（默认 `[{ minAmount: 1, feePercent: 0 }]`）。
   - **minAmount**: 起始股数（含）。
   - **feePercent**: 手续费比例（%）。
 - **precisionInteger**: 是否启用整数精度（默认 `false`）。
 
 ### 开发者选项
+
 - **enableDebug**: 是否启用调试模式（默认 `false`）。开启后可使用 `bourse.test.*` 系列调试指令。
 
 ### 宏观调控高级设置
+
 - **fixedUpdateTime**: 是否固定宏观目标的更新时间（默认 `false`）。
 - **fixedUpdateHour**: 固定更新时间（小时，0-23，默认 `9`）。仅在 `fixedUpdateTime` 为 `true` 时生效。
 - **biasMax**: 宏观期望上下偏倚的最大值（默认 `0.45`）。
 
 ### 分红机制
+
 - **dividendIntervalDays**: 分红结算周期（天，默认 `7`）。
 - **maxDividendRate**: 最大分红期望利润率（0-1，默认 `0.15`，超出部分用于除息而非派发）。
 
 ### 分红播报
+
 - **dividendBroadcastChannels**: 分红播报的频道/群聊 ID 列表（支持 `onebot:123` 或 `123`）。
 
 ### 新闻播报机制
+
 - **newsDeviationThreshold**: 触发新闻的偏离度阈值（默认 `0.15`，例如 `0.15` 表示偏离 15% 以上触发）。
 - **broadcastChannels**: 播报新闻的频道/群聊 ID 列表（为空则仅后台日志，不发送群消息）。
 - **positiveNews**: 利好新闻列表（表格配置）。
@@ -189,9 +199,11 @@ A: 股价采用 **"智能期望模型"** 驱动，更贴近真实博弈：
   - **weight**: 权重（整数，最小 `1`，数值越大越容易被选中）。
 
 ### 开发者选项
+
 - **enableDebug**: 是否启用调试模式（默认 `false`）。开启后可使用 `bourse.test.*` 系列调试指令。
 
 ### 配置示例
+
 ```yaml
 sellFeeTiers:
   - minAmount: 1
@@ -219,6 +231,7 @@ negativeNews:
 详细的更新日志请查看 [CHANGELOG.md](./CHANGELOG.md)。
 
 ## 🙏 第三方资源/致谢
+
 - Roboto Mono 字体（SIL OPEN FONT LICENSE Version 1.1）：[字体链接](https://fonts.google.com/specimen/Roboto+Mono)
 
 ---
