@@ -39,7 +39,7 @@
       /* 修改 3: 增大页面外间距 (32px -> 64px) */
       padding: 64px;
       /* 统一字体组合 */
-      font-family: 'Roboto Mono', 'Trebuchet MS', 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
+      font-family: 'Roboto Mono', 'PingFang SC', 'Microsoft YaHei', sans-serif;
       background-color: var(--bg-color);
       width: 960px;
       height: 720px;
@@ -87,8 +87,12 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 32px;
-      color: var(--text-primary);
+    }
+
+    .stock-icon img {
+      width: 32px;
+      height: 32px;
+      display: block;
     }
 
     .stock-meta {
@@ -211,7 +215,7 @@
       color: var(--text-primary);
       font-weight: 600;
       /* 修改 2: 强制使用数字字体 */
-      font-family: 'Roboto Mono', monospace;
+      font-family: 'Roboto Mono', 'PingFang SC', 'Microsoft YaHei', sans-serif;
     }
 
     /* --- 图表区域 --- */
@@ -306,7 +310,7 @@
       opacity: 0.8;
       margin-top: 6px;
       /* 百分比也属于数字，用一下 Roboto Mono 更好看 */
-      font-family: 'Roboto Mono', sans-serif;
+      font-family: 'Roboto Mono', 'PingFang SC', 'Microsoft YaHei', sans-serif;
     }
 
     /* 底部时间戳 */
@@ -324,7 +328,7 @@
       color: var(--text-secondary);
       padding: 6px 8px;
       border-radius: 6px;
-      font-family: 'Roboto Mono', sans-serif;
+      font-family: 'Roboto Mono', 'PingFang SC', 'Microsoft YaHei', sans-serif;
       /* 包含时间数字 */
     }
   </style>
@@ -335,7 +339,7 @@
     <!-- 顶部信息栏 -->
     <div class="top-section">
       <div class="stock-group">
-        <div class="stock-icon">⚡</div>
+        <div class="stock-icon"><img src="{{ICON_STOCK}}" alt="" /></div>
         <div class="stock-meta">
           <div class="stock-name" id="stock-name">--</div>
           <!-- 这里会动态插入徽标 -->

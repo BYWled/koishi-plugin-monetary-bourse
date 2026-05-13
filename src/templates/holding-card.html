@@ -27,7 +27,7 @@
       position: relative;
       margin: 0;
       padding: 32px;
-      font-family: 'Roboto Mono', 'Trebuchet MS', 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
+      font-family: 'Roboto Mono', 'PingFang SC', 'Microsoft YaHei', sans-serif;
       background-color: var(--bg-color);
       width: 480px;
       box-sizing: border-box;
@@ -60,10 +60,13 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      color: white;
-      font-size: 24px;
-      font-weight: 700;
       box-shadow: 0 8px 16px rgba(99, 102, 241, 0.3);
+    }
+
+    .avatar-icon {
+      width: 28px;
+      height: 28px;
+      display: block;
     }
 
     .user-info {
@@ -159,7 +162,7 @@
       color: var(--text-primary);
       padding: 4px 10px;
       border-radius: 6px;
-      font-family: 'Roboto Mono', 'Trebuchet MS', monospace;
+      font-family: 'Roboto Mono', 'PingFang SC', 'Microsoft YaHei', sans-serif;
     }
 
     .stock-body {
@@ -187,7 +190,7 @@
       font-size: 18px;
       font-weight: 450;
       color: var(--text-primary);
-      font-family: 'Roboto Mono', 'Trebuchet MS', monospace;
+      font-family: 'Roboto Mono', 'PingFang SC', 'Microsoft YaHei', sans-serif;
       letter-spacing: -0.3px;
     }
 
@@ -249,7 +252,10 @@
     }
 
     .empty-icon {
-      font-size: 32px;
+      width: 36px;
+      height: 36px;
+      display: block;
+      margin: 0 auto 12px;
       margin-bottom: 12px;
       opacity: 0.5;
     }
@@ -361,8 +367,24 @@
       font-size: 18px;
       font-weight: 600;
       color: var(--text-primary);
-      font-family: 'Roboto Mono', monospace;
+      font-family: 'Roboto Mono', 'PingFang SC', 'Microsoft YaHei', sans-serif;
       letter-spacing: -0.5px;
+    }
+
+    .inline-icon {
+      width: 16px;
+      height: 16px;
+      display: inline-block;
+      vertical-align: middle;
+      flex-shrink: 0;
+    }
+
+    .stock-name-icon {
+      width: 18px;
+      height: 18px;
+      display: inline-block;
+      vertical-align: middle;
+      flex-shrink: 0;
     }
 
     /* Bottom Row */
@@ -403,9 +425,9 @@
 </head>
 
 <body>
-  <div class="card">
-    <div class="header">
-      <div class="avatar" id="avatar"></div>
+    <div class="card">
+      <div class="header">
+      <div class="avatar"><img class="avatar-icon" src="{{ICON_USER}}" alt="" /></div>
       <div class="user-info">
         <div class="username" id="username"></div>
         <div class="account-label">股票账户</div>
@@ -424,7 +446,6 @@
     const DATA = JSON.parse(document.getElementById('data-source').textContent);
 
     // 渲染用户信息
-    document.getElementById('avatar').textContent = DATA.username.charAt(0).toUpperCase();
     document.getElementById('username').textContent = DATA.username;
     document.getElementById('footer').textContent = `数据更新于 ${DATA.updateTime}`;
 
@@ -454,7 +475,7 @@
           <div class="stock-card">
             <div class="stock-header">
               <div class="stock-name">
-                <span>⚡</span>
+                <img class="stock-name-icon" src="{{ICON_STOCK}}" alt="" />
                 ${h.stockName}
               </div>
               <div class="stock-amount">${h.amount} 股</div>
@@ -488,7 +509,7 @@
         <div class="section">
           <div class="section-title">持仓详情 Holding</div>
           <div class="empty-state">
-            <div class="empty-icon">📭</div>
+            <img class="empty-icon" src="{{ICON_EMPTY}}" alt="" />
             <div class="empty-text">暂无持仓</div>
           </div>
         </div>
@@ -502,7 +523,7 @@
         <div class="pending-item">
           <div class="pi-header">
             <span class="pi-badge ${p.typeClass}">${p.type}</span>
-            <span class="pi-time">⏱ ${p.timeLeft}</span>
+            <span class="pi-time"><img class="inline-icon" src="{{ICON_CLOCK}}" alt="" />${p.timeLeft}</span>
           </div>
           <div class="pi-amount">${p.amount} 股</div>
           <div class="pi-footer">

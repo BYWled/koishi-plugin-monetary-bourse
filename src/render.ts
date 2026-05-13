@@ -1,3 +1,4 @@
+import { readFileSync } from "fs";
 import { Context, h, Logger } from "koishi";
 import { resolve } from "path";
 import { pathToFileURL } from "url";
@@ -6,9 +7,28 @@ import { promises as fs } from "fs";
 const templatesDir = resolve(__dirname, "templates");
 const assetsDir = resolve(__dirname, "..", "assets");
 const assetsBaseUrl = pathToFileURL(assetsDir).toString().replace(/\/$/, "");
+const iconMap: Record<string, string> = {
+  stock: "icons/stock.svg",
+  user: "icons/user.svg",
+  empty: "icons/empty.svg",
+  clock: "icons/clock.svg",
+  trendUp: "icons/trend-up.svg",
+  trendDown: "icons/trend-down.svg",
+};
+const iconDataUrls: Record<string, string> = {};
 
 function getAssetUrl(relativePath: string): string {
   return `${assetsBaseUrl}/${relativePath}`;
+}
+
+for (const [key, relativePath] of Object.entries(iconMap)) {
+  try {
+    const absolutePath = resolve(assetsDir, relativePath);
+    const buffer = readFileSync(absolutePath);
+    iconDataUrls[key] = `data:image/svg+xml;base64,${buffer.toString("base64")}`;
+  } catch {
+    iconDataUrls[key] = getAssetUrl(relativePath);
+  }
 }
 
 function getFontFaceCss(): string {
@@ -36,6 +56,32 @@ function getFontFaceCss(): string {
 
 function injectFontFace(template: string): string {
   return template.replace("{{FONT_FACE}}", getFontFaceCss());
+}
+
+function getIconUrl(iconName: keyof typeof iconMap): string {
+  return iconDataUrls[iconName] || "";
+}
+
+function replaceTemplateTokens(
+  template: string,
+  replacements: Record<string, string>,
+): string {
+  let result = template;
+  for (const [key, value] of Object.entries(replacements)) {
+    result = result.replace(new RegExp(key, "g"), () => value);
+  }
+  return result;
+}
+
+export function injectStaticAssets(template: string): string {
+  return replaceTemplateTokens(injectFontFace(template), {
+    "{{ICON_STOCK}}": getIconUrl("stock"),
+    "{{ICON_USER}}": getIconUrl("user"),
+    "{{ICON_EMPTY}}": getIconUrl("empty"),
+    "{{ICON_CLOCK}}": getIconUrl("clock"),
+    "{{ICON_TREND_UP}}": getIconUrl("trendUp"),
+    "{{ICON_TREND_DOWN}}": getIconUrl("trendDown"),
+  });
 }
 
 export type PricePoint = {
@@ -88,7 +134,7 @@ export async function renderHoldingImage(
   try {
     const templatePath = resolve(templatesDir, "holding-card.html");
     let template = await fs.readFile(templatePath, "utf-8");
-    template = injectFontFace(template);
+    template = injectStaticAssets(template);
 
     const data = {
       username,
@@ -144,7 +190,7 @@ export async function renderTradeResultImage(
   try {
     const templatePath = resolve(templatesDir, "trade-result.html");
     let template = await fs.readFile(templatePath, "utf-8");
-    template = injectFontFace(template);
+    template = injectStaticAssets(template);
 
     const tradeIndex = priceHistory.length - 1;
     const status = tradeMeta?.status ?? "settled";
@@ -225,7 +271,7 @@ export async function renderStockImage(
 
     const templatePath = resolve(templatesDir, "stock-chart.html");
     let html = await fs.readFile(templatePath, "utf-8");
-    html = injectFontFace(html);
+    html = injectStaticAssets(html);
 
     const colorScheme = {
       mainColor: isUp ? "#f23645" : "#089981",
@@ -259,7 +305,7 @@ export async function renderStockImage(
       }),
       "{{CURRENT_PRICE}}": current.toFixed(2),
       "{{CHANGE_VALUE}}": `${change >= 0 ? "+" : ""}${change.toFixed(2)}`,
-      "{{CHANGE_ICON}}": change >= 0 ? "↑" : "↓",
+      "{{CHANGE_ICON}}": change >= 0 ? getIconUrl("trendUp") : getIconUrl("trendDown"),
       "{{CHANGE_PERCENT}}": Math.abs(changePercent).toFixed(2),
       "{{CHART_TYPE}}": chartType,
       "{{HIGH_PRICE}}": high.toFixed(2),
@@ -274,9 +320,7 @@ export async function renderStockImage(
       "{{G2_SCRIPT}}": "",
     };
 
-    for (const [key, value] of Object.entries(replacements)) {
-      html = html.replace(new RegExp(key, "g"), () => value);
-    }
+    html = replaceTemplateTokens(html, replacements);
 
     const page = await ctx.puppeteer.page();
     try {

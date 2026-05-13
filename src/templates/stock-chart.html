@@ -25,7 +25,7 @@
 
       body {
         padding: 64px;
-        font-family: 'Roboto Mono', 'Trebuchet MS', 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
+        font-family: 'Roboto Mono', 'PingFang SC', 'Microsoft YaHei', sans-serif;
         background-color: var(--bg-color);
         width: 1024px;
         height: 768px;
@@ -79,8 +79,13 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 24px;
         box-shadow: 0 8px 20px var(--icon-shadow);
+      }
+
+      .stock-icon img {
+        width: 24px;
+        height: 24px;
+        display: block;
       }
 
       .meta-info {
@@ -99,7 +104,7 @@
       .price-group { text-align: right; }
 
       .current-price {
-        font-family: 'Roboto Mono', 'Trebuchet MS', monospace;
+        font-family: 'Roboto Mono', 'PingFang SC', 'Microsoft YaHei', sans-serif;
         font-size: 64px;
         font-weight: normal;
         color: var(--main-color);
@@ -125,6 +130,12 @@
         display: flex;
         align-items: center;
         gap: 4px;
+      }
+
+      .change-icon {
+        width: 14px;
+        height: 14px;
+        display: block;
       }
 
       .chart-wrapper {
@@ -184,7 +195,7 @@
         font-size: 20px;
         font-weight: 600;
         color: var(--text-primary);
-        font-family: 'Roboto Mono', monospace;
+        font-family: 'Roboto Mono', 'PingFang SC', 'Microsoft YaHei', sans-serif;
         letter-spacing: 0;
       }
 
@@ -204,7 +215,7 @@
       <div class="header">
         <div class="title-group">
           <div class="stock-name">
-            <div class="stock-icon">¥</div>
+            <div class="stock-icon"><img src="{{ICON_STOCK}}" alt="" /></div>
             {{STOCK_NAME}}
           </div>
           <div class="meta-info">
@@ -228,9 +239,10 @@
               "
               >{{CHANGE_VALUE}}</span
             >
-            <span class="change-badge"
-              >{{CHANGE_ICON}} {{CHANGE_PERCENT}}%</span
-            >
+            <span class="change-badge">
+              <img class="change-icon" src="{{CHANGE_ICON}}" alt="" />
+              {{CHANGE_PERCENT}}%
+            </span>
           </div>
         </div>
       </div>
@@ -331,7 +343,7 @@
 
           const val = yMin + (i / 4) * yRange;
           ctx.fillStyle = "#64748b";
-          ctx.font = '12px "Trebuchet MS", monospace';
+          ctx.font = '12px "Roboto Mono"';
           ctx.textAlign = "left";
           ctx.textBaseline = "middle";
           ctx.fillText(val.toFixed(2), W - padding.right + 10, y);
@@ -395,7 +407,7 @@
         ctx.setLineDash([]);
 
         const currentPriceStr = prices[prices.length - 1].toFixed(2);
-        ctx.font = 'bold 13px "Trebuchet MS", monospace';
+        ctx.font = 'bold 13px "Roboto Mono"';
         const labelWidth = ctx.measureText(currentPriceStr).width + 18;
         const labelHeight = 24;
         const labelX = W - padding.right;
@@ -423,8 +435,7 @@
         ctx.textAlign = "center";
         ctx.textBaseline = "top";
         ctx.fillStyle = "#64748b";
-        ctx.font =
-          '12px -apple-system, BlinkMacSystemFont, "Inter", sans-serif';
+        ctx.font = '12px "Roboto Mono"';
         const labelIndexes = [
           0,
           Math.floor((times.length - 1) / 2),
