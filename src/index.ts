@@ -91,6 +91,8 @@ export interface BourseState {
   endTime: Date; // 本周期预计结束时间
   marketOpenStatus?: "open" | "close" | "auto"; // 市场开关状态
   lastDividendDate?: Date; // 上次分红时间
+  circuitBreakerUntil?: Date; // 熔断截止时间（存在则表示熔断中）
+  circuitBreakerTriggerPrice?: number; // 熔断触发时的价格（用于回弹模式）
 }
 
 export const usage = `
@@ -107,6 +109,8 @@ export const usage = `
     <li><b>防刷冻结机制</b>：防止用户低买高卖高频刷单。通过 <code>freezeCostPerMinute</code> 调整资金与排队时间比例；设定 <code>minFreezeTime</code> 与 <code>maxFreezeTime</code> 防止过长或过短排队。可将最小时间设为 0 使小额交易秒成。</li>
     <li><b>手续费与精度</b>：可配置分档卖出手续费 <code>sellFeeTiers</code>（股数越大费率越低）；若你使用的通货不支持小数，请开启 <code>precisionInteger</code>。</li>
     <li><b>宏观调控引擎</b>：调整 <code>biasMax</code> 限制期望偏倚的极端值。此外，可以固定每日定期刷新宏观目标的时刻，以便在人流高峰期制造行情的明确转折。</li>
+    <li><b>熔断机制</b>：当日跌幅超过阈值时自动触发熔断，暂停交易并冻结价格。支持配置触发阈值、持续时间和后期望模式（回弹/随机/持平）。熔断期间禁止交易，管理员可通过 <code>stock.circuit clear</code> 手动解除。</li>
+    <li><b>售出价机制</b>：模拟真实市场的买卖价差。卖出时实际成交价 = 当前价 - <code>sellPriceDeduction</code>；买入时实际成交价 = 当前价 + <code>buyPriceAddition</code>。扣减/加价在手续费之前应用。</li>
   </ul>
 
   <h3>📖 开发者建议</h3>
@@ -160,6 +164,14 @@ export interface Config {
   broadcastChannels: string[];
   positiveNews: NewsItem[];
   negativeNews: NewsItem[];
+  // 熔断机制
+  circuitBreakerEnabled: boolean;
+  circuitBreakerThreshold: number;
+  circuitBreakerDuration: number;
+  circuitBreakerExpectation: "rebound" | "random" | "flat";
+  // 售出价机制（双向价差）
+  sellPriceDeduction: number;
+  buyPriceAddition: number;
 }
 
 export const Config: Schema<Config> = Schema.intersect([
@@ -232,6 +244,14 @@ export const Config: Schema<Config> = Schema.intersect([
     precisionInteger: Schema.boolean()
       .default(false)
       .description("是否将所有计数精度设置为整数"),
+    sellPriceDeduction: Schema.number()
+      .min(0)
+      .default(1)
+      .description("卖出时的价格扣减（实际成交价 = 当前价 - 此值）"),
+    buyPriceAddition: Schema.number()
+      .min(0)
+      .default(1)
+      .description("买入时的价格加价（实际成交价 = 当前价 + 此值）"),
   }).description("手续费与精度"),
 
   Schema.object({
@@ -325,6 +345,30 @@ export const Config: Schema<Config> = Schema.intersect([
   }).description("新闻播报机制"),
 
   Schema.object({
+    circuitBreakerEnabled: Schema.boolean()
+      .default(false)
+      .description("启用熔断机制（当日跌幅超过阈值时暂停交易）"),
+    circuitBreakerThreshold: Schema.number()
+      .min(0.01)
+      .max(1)
+      .step(0.01)
+      .default(0.15)
+      .description("熔断触发阈值（日跌幅百分比，如 0.15 表示跌 15% 触发）"),
+    circuitBreakerDuration: Schema.number()
+      .min(1)
+      .step(1)
+      .default(30)
+      .description("熔断持续时间（分钟）"),
+    circuitBreakerExpectation: Schema.union([
+      Schema.const("rebound").description("回弹：熔断后目标价恢复到当日开盘价"),
+      Schema.const("random").description("随机：熔断后恢复正常宏观调控"),
+      Schema.const("flat").description("持平：熔断后目标价设为熔断时的价格"),
+    ])
+      .default("rebound")
+      .description("熔断后期望模式"),
+  }).description("熔断机制"),
+
+  Schema.object({
     enableDebug: Schema.boolean()
       .default(false)
       .description("启用调试模式（开启后可使用调试指令）"),
@@ -389,6 +433,8 @@ export function apply(ctx: Context, config: Config) {
       endTime: "timestamp",
       marketOpenStatus: "string",
       lastDividendDate: "timestamp",
+      circuitBreakerUntil: "timestamp",
+      circuitBreakerTriggerPrice: "double",
     },
     { primary: "key" },
   );
@@ -1039,12 +1085,63 @@ export function apply(ctx: Context, config: Config) {
       if (!(state.lastCycleStart instanceof Date))
         state.lastCycleStart = new Date(state.lastCycleStart);
 
+      if (state.circuitBreakerUntil && !(state.circuitBreakerUntil instanceof Date))
+        state.circuitBreakerUntil = new Date(state.circuitBreakerUntil);
+
       if (!state.endTime)
         state.endTime = new Date(
           state.lastCycleStart.getTime() + 7 * 24 * 3600 * 1000,
         );
       if (!(state.endTime instanceof Date))
         state.endTime = new Date(state.endTime);
+    }
+
+    // ============================================================
+    // 熔断机制：检查熔断状态
+    // ============================================================
+    if (config.circuitBreakerEnabled && state?.circuitBreakerUntil) {
+      if (now < state.circuitBreakerUntil) {
+        // 熔断中，价格冻结
+        return;
+      }
+      // 熔断刚结束，处理后期望
+      const expectation = config.circuitBreakerExpectation;
+      if (expectation === "rebound" && state.circuitBreakerTriggerPrice) {
+        // 回弹模式：目标价恢复到熔断触发时的价格（当日开盘价）
+        state.targetPrice = state.circuitBreakerTriggerPrice;
+        await ctx.database.set(
+          "bourse_state",
+          { key: "macro_state" },
+          { targetPrice: state.targetPrice },
+        );
+        logger.info(
+          `熔断结束（回弹模式）：目标价恢复到 ${state.circuitBreakerTriggerPrice}`,
+        );
+        switchKLinePattern("熔断回弹", state.targetPrice, 0.5);
+      } else if (expectation === "flat") {
+        // 持平模式：目标价设为当前价格
+        state.targetPrice = currentPrice;
+        await ctx.database.set(
+          "bourse_state",
+          { key: "macro_state" },
+          { targetPrice: state.targetPrice },
+        );
+        logger.info(
+          `熔断结束（持平模式）：目标价设为当前价 ${currentPrice}`,
+        );
+        switchKLinePattern("熔断持平", state.targetPrice, 0.5);
+      } else {
+        // 随机模式：不做特殊处理
+        logger.info("熔断结束（随机模式）：恢复正常宏观调控");
+      }
+      // 清除熔断状态
+      await ctx.database.set(
+        "bourse_state",
+        { key: "macro_state" },
+        { circuitBreakerUntil: null, circuitBreakerTriggerPrice: null },
+      );
+      state.circuitBreakerUntil = undefined;
+      state.circuitBreakerTriggerPrice = undefined;
     }
 
     // 状态初始化或过期检查（手动与自动到期都应切换为自动新周期）
@@ -1228,6 +1325,29 @@ export function apply(ctx: Context, config: Config) {
       price: newPrice,
       time: new Date(),
     });
+
+    // ============================================================
+    // 熔断机制：检查是否触发熔断
+    // ============================================================
+    if (config.circuitBreakerEnabled && dailyOpenPrice !== null) {
+      const dailyDrop = (dailyOpenPrice - currentPrice) / dailyOpenPrice;
+      if (dailyDrop >= config.circuitBreakerThreshold) {
+        const circuitBreakerUntil = new Date(
+          now.getTime() + config.circuitBreakerDuration * 60 * 1000,
+        );
+        await ctx.database.set(
+          "bourse_state",
+          { key: "macro_state" },
+          {
+            circuitBreakerUntil,
+            circuitBreakerTriggerPrice: dailyOpenPrice,
+          },
+        );
+        logger.warn(
+          `熔断触发！日跌幅 ${(dailyDrop * 100).toFixed(2)}% 超过阈值 ${(config.circuitBreakerThreshold * 100).toFixed(0)}%，熔断至 ${circuitBreakerUntil.toLocaleString()}`,
+        );
+      }
+    }
   }
 
   // --- 交易处理逻辑 ---
@@ -1545,6 +1665,28 @@ export function apply(ctx: Context, config: Config) {
     __testNow = value;
   };
 
+  const getCircuitBreakerStatus = async () => {
+    if (!config.circuitBreakerEnabled) return { active: false, until: null };
+    const state = (
+      await ctx.database.get("bourse_state", { key: "macro_state" })
+    )[0];
+    if (!state?.circuitBreakerUntil) return { active: false, until: null };
+    const until = state.circuitBreakerUntil instanceof Date
+      ? state.circuitBreakerUntil
+      : new Date(state.circuitBreakerUntil);
+    const now = new Date();
+    if (now < until) {
+      return { active: true, until };
+    }
+    return { active: false, until: null };
+  };
+
+  const getTotalBalance = async (uid: number): Promise<number> => {
+    const cash = await getCashBalance(uid, config.currency);
+    const bankDemand = await getBankDemandBalance(uid, config.currency);
+    return fmtAmount(cash + bankDemand);
+  };
+
   registerStockCommands({
     ctx,
     config,
@@ -1560,6 +1702,8 @@ export function apply(ctx: Context, config: Config) {
     renderTradeResultImage,
     renderHoldingImage,
     pay,
+    getCircuitBreakerStatus,
+    getTotalBalance,
   });
 
   registerAdminCommands({

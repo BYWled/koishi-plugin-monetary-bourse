@@ -35,6 +35,8 @@ type StockCommandDeps = {
     cost: number,
     currency: string,
   ) => Promise<{ success: boolean; msg?: string }>;
+  getCircuitBreakerStatus: () => Promise<{ active: boolean; until: Date | null }>;
+  getTotalBalance: (uid: number) => Promise<number>;
 };
 
 export function registerStockCommands(deps: StockCommandDeps) {
@@ -53,6 +55,8 @@ export function registerStockCommands(deps: StockCommandDeps) {
     renderTradeResultImage,
     renderHoldingImage,
     pay,
+    getCircuitBreakerStatus,
+    getTotalBalance,
   } = deps;
 
   ctx
@@ -222,16 +226,19 @@ export function registerStockCommands(deps: StockCommandDeps) {
     });
 
   ctx
-    .command("stock.buy <amount:number>", "买入股票")
+    .command("stock.buy <amount:string>", "买入股票（支持 all 全部买入）")
     .userFields(["id"])
-    .action(async ({ session }, amount) => {
-      if (!amount || amount <= 0 || !Number.isInteger(amount)) {
-        logger.warn(
-          `stock.buy: 非法买入数量 user=${session.userId}, amount=${amount}`,
-        );
-        return "请输入有效的购买股数（整数）。";
+    .action(async ({ session }, amountStr) => {
+      if (!amountStr) {
+        return "请输入购买股数或 all。";
       }
       if (!(await isMarketOpen())) return "休市中，无法交易。";
+
+      // 熔断检查
+      const circuitBreaker = await getCircuitBreakerStatus();
+      if (circuitBreaker.active) {
+        return `熔断中，交易暂停，预计 ${circuitBreaker.until?.toLocaleString("zh-CN")} 恢复。`;
+      }
 
       const visibleUserId = session.userId;
 
@@ -254,7 +261,49 @@ export function registerStockCommands(deps: StockCommandDeps) {
         return "无法获取用户ID，请稍后重试。";
       }
 
-      const currentPrice = getCurrentPrice();
+      const basePrice = getCurrentPrice();
+      // 买入价加价
+      const currentPrice = fmtPrice(basePrice + config.buyPriceAddition);
+
+      // 解析数量：支持 "all" 或数字
+      let amount: number;
+      if (amountStr.toLowerCase() === "all") {
+        // "all" 模式：直接根据余额计算最大可买股数
+        const totalBalance = await getTotalBalance(uid);
+        if (totalBalance <= 0) {
+          return "余额不足，无法购买任何股票。";
+        }
+
+        // 检查当前持仓
+        const existingHolding = await ctx.database.get("bourse_holding", {
+          userId: visibleUserId,
+          stockId,
+        });
+        const currentHoldingAmount = existingHolding.length > 0 ? existingHolding[0].amount : 0;
+        const remainingCapacity = config.maxHoldings - currentHoldingAmount;
+
+        if (remainingCapacity <= 0) {
+          return `持仓已满！最大持仓限制: ${config.maxHoldings} 股。`;
+        }
+
+        // 根据余额计算最大可买数量
+        const maxBuyableByBalance = Math.floor(totalBalance / currentPrice);
+        amount = Math.min(maxBuyableByBalance, remainingCapacity);
+
+        if (amount <= 0) {
+          return "余额不足，无法购买任何股票。";
+        }
+      } else {
+        // 数字模式
+        amount = Number(amountStr);
+        if (!amount || amount <= 0 || !Number.isInteger(amount)) {
+          logger.warn(
+            `stock.buy: 非法买入数量 user=${session.userId}, amount=${amountStr}`,
+          );
+          return "请输入有效的购买股数（整数）或 all。";
+        }
+      }
+
       const cost = fmtAmount(currentPrice * amount);
 
       const payResult = await pay(uid, cost, config.currency);
@@ -337,6 +386,11 @@ export function registerStockCommands(deps: StockCommandDeps) {
           undefined,
           newHoldingAmount,
           tradeMeta,
+          {
+            marketPrice: basePrice,
+            deduction: config.buyPriceAddition,
+            deductionLabel: '加价',
+          },
         );
       }
 
@@ -361,20 +415,28 @@ export function registerStockCommands(deps: StockCommandDeps) {
         undefined,
         projectedHolding,
         tradeMeta,
+        {
+          marketPrice: basePrice,
+          deduction: config.buyPriceAddition,
+          deductionLabel: '加价',
+        },
       );
     });
 
   ctx
-    .command("stock.sell <amount:number>", "卖出股票")
+    .command("stock.sell <amount:string>", "卖出股票（支持 all 全部卖出）")
     .userFields(["id"])
-    .action(async ({ session }, amount) => {
-      if (!amount || amount <= 0 || !Number.isInteger(amount)) {
-        logger.warn(
-          `stock.sell: 非法卖出数量 user=${session.userId}, amount=${amount}`,
-        );
-        return "请输入有效的卖出股数。";
+    .action(async ({ session }, amountStr) => {
+      if (!amountStr) {
+        return "请输入卖出股数或 all。";
       }
       if (!(await isMarketOpen())) return "休市中，无法交易。";
+
+      // 熔断检查
+      const circuitBreaker = await getCircuitBreakerStatus();
+      if (circuitBreaker.active) {
+        return `熔断中，交易暂停，预计 ${circuitBreaker.until?.toLocaleString("zh-CN")} 恢复。`;
+      }
 
       const visibleUserId = session.userId;
 
@@ -392,7 +454,7 @@ export function registerStockCommands(deps: StockCommandDeps) {
       const uid = session.user.id;
       if (typeof uid !== "number") {
         logger.error(
-          `stock.buy: 无法获取数字UID user=${session.userId}, rawId=${uid}`,
+          `stock.sell: 无法获取数字UID user=${session.userId}, rawId=${uid}`,
         );
         return "无法获取用户ID，请稍后重试。";
       }
@@ -402,16 +464,36 @@ export function registerStockCommands(deps: StockCommandDeps) {
         stockId,
       });
 
-      if (holding.length === 0 || holding[0].amount < amount) {
-        const currentAmount = holding.length ? holding[0].amount : 0;
+      const currentHolding = holding[0];
+      const currentAmount = currentHolding ? currentHolding.amount : 0;
+
+      // 解析数量：支持 "all" 或数字
+      let amount: number;
+      if (amountStr.toLowerCase() === "all") {
+        if (currentAmount <= 0) {
+          return "你没有任何持仓。";
+        }
+        amount = currentAmount;
+      } else {
+        amount = Number(amountStr);
+        if (!amount || amount <= 0 || !Number.isInteger(amount)) {
+          logger.warn(
+            `stock.sell: 非法卖出数量 user=${session.userId}, amount=${amountStr}`,
+          );
+          return "请输入有效的卖出股数（整数）或 all。";
+        }
+      }
+
+      if (holding.length === 0 || currentAmount < amount) {
         logger.warn(
           `stock.sell: 持仓不足 user=${session.userId}, amount=${amount}, current=${currentAmount}`,
         );
         return `持仓不足！当前持有: ${currentAmount} 股。`;
       }
 
-      const currentPrice = getCurrentPrice();
-      const currentHolding = holding[0];
+      const basePrice = getCurrentPrice();
+      // 卖出价扣减
+      const currentPrice = fmtPrice(Math.max(1, basePrice - config.sellPriceDeduction));
       let existingTotalCost = currentHolding.totalCost;
       if (!existingTotalCost || existingTotalCost <= 0) {
         existingTotalCost = fmtAmount(currentHolding.amount * currentPrice);
@@ -527,6 +609,11 @@ export function registerStockCommands(deps: StockCommandDeps) {
           },
           undefined,
           tradeMeta,
+          {
+            marketPrice: basePrice,
+            deduction: config.sellPriceDeduction,
+            deductionLabel: '扣减',
+          },
         );
       }
 
@@ -552,6 +639,11 @@ export function registerStockCommands(deps: StockCommandDeps) {
         },
         undefined,
         tradeMeta,
+        {
+          marketPrice: basePrice,
+          deduction: config.sellPriceDeduction,
+          deductionLabel: '扣减',
+        },
       );
     });
 

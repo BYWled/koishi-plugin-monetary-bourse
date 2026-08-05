@@ -36,9 +36,7 @@
     }
 
     body {
-      /* 修改 3: 增大页面外间距 (32px -> 64px) */
       padding: 64px;
-      /* 统一字体组合 */
       font-family: 'Roboto Mono', 'PingFang SC', 'Microsoft YaHei', sans-serif;
       background-color: var(--bg-color);
       width: 960px;
@@ -54,7 +52,6 @@
       width: 100%;
       height: 100%;
       padding: 32px 40px;
-      /* 内部左右间距也稍微增加一点 */
       border-radius: 16px;
       box-shadow: 0 32px 64px rgba(0, 0, 0, 0.6), 0 0 0 1px var(--border-color);
       display: flex;
@@ -69,17 +66,19 @@
       justify-content: space-between;
       align-items: center;
       margin-bottom: 24px;
+      gap: 24px;
     }
 
     .stock-group {
       display: flex;
       align-items: center;
       gap: 16px;
+      min-width: 0;
+      flex-shrink: 1;
     }
 
     .stock-icon {
       width: 64px;
-      /* 稍微加大 */
       height: 64px;
       border-radius: 14px;
       background: linear-gradient(135deg, #2b313a, #1f242e);
@@ -87,6 +86,7 @@
       display: flex;
       align-items: center;
       justify-content: center;
+      flex-shrink: 0;
     }
 
     .stock-icon img {
@@ -100,33 +100,36 @@
       flex-direction: column;
       justify-content: center;
       gap: 8px;
+      min-width: 0;
     }
 
     .stock-name {
       font-size: 28px;
-      /* 加大 */
       font-weight: 700;
       line-height: 1.1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     /* 徽标容器 */
     .badges-container {
       display: flex;
       gap: 8px;
+      flex-wrap: wrap;
     }
 
     .badge {
       display: inline-flex;
       align-items: center;
       padding: 6px 12px;
-      /* 修改 1: 加大内边距 */
       border-radius: 6px;
       font-size: 14px;
-      /* 修改 1: 增大字号 (13px -> 14px) */
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.5px;
       line-height: 1;
+      white-space: nowrap;
     }
 
     .badge.buy {
@@ -159,31 +162,22 @@
     }
 
     @keyframes pulse {
-      0% {
-        opacity: 1;
-      }
-
-      50% {
-        opacity: 0.4;
-      }
-
-      100% {
-        opacity: 1;
-      }
+      0% { opacity: 1; }
+      50% { opacity: 0.4; }
+      100% { opacity: 1; }
     }
 
     .price-group {
       text-align: right;
+      flex-shrink: 0;
     }
 
     .main-price {
       font-size: 56px;
-      /* 加大 */
       font-weight: 500;
       letter-spacing: -2px;
       line-height: 1;
       margin-bottom: 8px;
-      /* 修改 2: 强制使用数字字体 */
       font-family: 'Roboto Mono';
     }
 
@@ -197,25 +191,30 @@
 
     .sub-detail {
       font-size: 16px;
-      /* 修改 1: 增大字号 (15px -> 16px) */
       color: var(--text-secondary);
       display: flex;
       align-items: center;
       justify-content: flex-end;
-      gap: 16px;
+      gap: 12px;
+      flex-wrap: wrap;
     }
 
     .sub-detail span {
       display: inline-flex;
       align-items: center;
       gap: 6px;
+      white-space: nowrap;
     }
 
     .val-highlight {
       color: var(--text-primary);
       font-weight: 600;
-      /* 修改 2: 强制使用数字字体 */
       font-family: 'Roboto Mono', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    }
+
+    .price-breakdown-text {
+      color: var(--text-secondary);
+      font-size: 14px;
     }
 
     /* --- 图表区域 --- */
@@ -223,8 +222,7 @@
       flex: 1;
       width: 100%;
       min-height: 0;
-      margin-bottom: 32px;
-      /* 增加底部间距 */
+      margin-bottom: 24px;
       border-radius: 12px;
       background: rgba(0, 0, 0, 0.2);
       border: 1px solid var(--border-color);
@@ -241,24 +239,27 @@
     .stats-grid {
       display: grid;
       grid-template-columns: 1fr 1fr 1fr;
-      gap: 20px;
-      height: 120px;
-      /* 增加高度以容纳更大的字体 */
+      gap: 16px;
+      min-height: 100px;
+      max-height: 140px;
     }
 
     .stats-grid.sell-grid {
       grid-template-columns: 1fr 1fr 1fr 1fr;
+      gap: 12px;
     }
 
     .stat-item {
       background: var(--item-bg);
       border: 1px solid var(--border-color);
       border-radius: 12px;
-      padding: 16px 20px;
+      padding: 14px 16px;
       display: flex;
       flex-direction: column;
       justify-content: center;
       position: relative;
+      min-width: 0;
+      overflow: hidden;
     }
 
     .stat-item.highlight {
@@ -278,21 +279,26 @@
 
     .stat-label {
       font-size: 14px;
-      /* 修改 1: 增大字号 (13px -> 14px) */
       text-transform: uppercase;
       color: var(--text-secondary);
       letter-spacing: 0.5px;
-      margin-bottom: 10px;
+      margin-bottom: 8px;
       font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      line-height: 1.2;
     }
 
     .stat-value {
-      font-size: 28px;
-      /* 加大 */
+      font-size: 26px;
       font-weight: 700;
       color: var(--text-primary);
-      /* 修改 2: 强制使用数字字体 */
       font-family: 'Roboto Mono', monospace;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      line-height: 1.2;
     }
 
     .stat-value.profit {
@@ -304,13 +310,14 @@
     }
 
     .stat-sub {
-      font-size: 14px;
-      /* 修改 1: 增大字号 */
+      font-size: 13px;
       color: var(--text-secondary);
       opacity: 0.8;
-      margin-top: 6px;
-      /* 百分比也属于数字，用一下 Roboto Mono 更好看 */
+      margin-top: 4px;
       font-family: 'Roboto Mono', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     /* 底部时间戳 */
@@ -329,7 +336,6 @@
       padding: 6px 8px;
       border-radius: 6px;
       font-family: 'Roboto Mono', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-      /* 包含时间数字 */
     }
   </style>
 </head>
@@ -342,7 +348,6 @@
         <div class="stock-icon"><img src="{{ICON_STOCK}}" alt="" /></div>
         <div class="stock-meta">
           <div class="stock-name" id="stock-name">--</div>
-          <!-- 这里会动态插入徽标 -->
           <div class="badges-container" id="badges-container"></div>
         </div>
       </div>
@@ -350,9 +355,9 @@
       <div class="price-group">
         <div class="main-price" id="trade-price"></div>
         <div class="sub-detail">
+          <span id="price-breakdown"></span>
+          <span class="detail-sep" style="opacity: 0.2">|</span>
           <span>数量 <b class="val-highlight" id="trade-amount"></b></span>
-          <span style="opacity: 0.2">|</span>
-          <span>总额 <b class="val-highlight" id="trade-total"></b></span>
         </div>
       </div>
     </div>
@@ -389,16 +394,251 @@
     const isBuy = DATA.tradeType === 'buy';
     const status = DATA.status || 'settled';
     const isPending = status === 'pending';
-
     const mainColor = isBuy ? '#f87171' : '#4ade80';
+
+    // ============================================================
+    // 动态样式调整系统
+    // ============================================================
+
+    /**
+     * 测量文本在给定字号下的宽度
+     */
+    function measureTextWidth(text, fontSize, fontWeight, fontFamily) {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      ctx.font = `${fontWeight} ${fontSize}px ${fontFamily || "'Roboto Mono', 'PingFang SC', 'Microsoft YaHei', sans-serif"}`;
+      return ctx.measureText(text).width;
+    }
+
+    /**
+     * 根据容器宽度和文本内容，计算合适的字号
+     * @param {string} text - 文本内容
+     * @param {number} containerWidth - 容器可用宽度
+     * @param {number} baseFontSize - 基准字号
+     * @param {number} minFontSize - 最小字号
+     * @param {number} fontWeight - 字重
+     * @returns {number} 合适的字号
+     */
+    function calcFontSize(text, containerWidth, baseFontSize, minFontSize, fontWeight = 700) {
+      let fontSize = baseFontSize;
+      const fontFamily = "'Roboto Mono', 'PingFang SC', 'Microsoft YaHei', sans-serif";
+
+      // 逐步缩小字号直到文本适合容器
+      while (fontSize > minFontSize) {
+        const textWidth = measureTextWidth(text, fontSize, fontWeight, fontFamily);
+        if (textWidth <= containerWidth) {
+          return fontSize;
+        }
+        fontSize -= 1;
+      }
+      return minFontSize;
+    }
+
+    /**
+     * 功态调整底部数据卡片
+     * 根据最长的标签和值来统一调整所有卡片的字号
+     */
+    function adjustStatsGrid() {
+      const grid = document.getElementById('stats-grid');
+      const items = grid.querySelectorAll('.stat-item');
+      if (items.length === 0) return;
+
+      const isSellGrid = grid.classList.contains('sell-grid');
+      const gap = isSellGrid ? 12 : 16;
+      const totalGap = gap * (items.length - 1);
+      const gridPadding = 0; // grid 本身没有 padding
+      const availableWidth = (grid.offsetWidth - totalGap) / items.length;
+
+      // 收集所有标签和值的文本
+      const labelTexts = [];
+      const valueTexts = [];
+      const subTexts = [];
+
+      items.forEach(item => {
+        const label = item.querySelector('.stat-label');
+        const value = item.querySelector('.stat-value');
+        const sub = item.querySelector('.stat-sub');
+        if (label) labelTexts.push(label.textContent);
+        if (value) valueTexts.push(value.textContent);
+        if (sub) subTexts.push(sub.textContent);
+      });
+
+      // 计算最长的标签文本
+      const maxLabelWidth = Math.max(...labelTexts.map(t => measureTextWidth(t, 14, 600)));
+      const maxLabelLength = Math.max(...labelTexts.map(t => t.length));
+
+      // 计算最长的值文本
+      const maxValueWidth = Math.max(...valueTexts.map(t => measureTextWidth(t, 26, 700)));
+      const maxValueLength = Math.max(...valueTexts.map(t => t.length));
+
+      // 计算最长的 sub 文本
+      const maxSubWidth = Math.max(...subTexts.map(t => measureTextWidth(t, 13, 400)));
+
+      // 内边距
+      const itemPaddingH = 32; // padding-left + padding-right (16+16)
+      const contentWidth = availableWidth - itemPaddingH;
+
+      // 动态调整字号
+      let labelFontSize = 14;
+      let valueFontSize = 26;
+      let subFontSize = 13;
+      let marginBottom = 8;
+
+      // 标签字号调整
+      if (maxLabelWidth > contentWidth) {
+        labelFontSize = calcFontSize(
+          labelTexts.reduce((a, b) => a.length > b.length ? a : b),
+          contentWidth,
+          14,
+          10,
+          600
+        );
+      }
+
+      // 值字号调整
+      if (maxValueWidth > contentWidth) {
+        valueFontSize = calcFontSize(
+          valueTexts.reduce((a, b) => a.length > b.length ? a : b),
+          contentWidth,
+          26,
+          16,
+          700
+        );
+      }
+
+      // sub 字号调整
+      if (maxSubWidth > contentWidth) {
+        subFontSize = calcFontSize(
+          subTexts.reduce((a, b) => a.length > b.length ? a : b),
+          contentWidth,
+          13,
+          10,
+          400
+        );
+      }
+
+      // 如果值字号缩小了，标签和间距也要相应缩小
+      if (valueFontSize < 26) {
+        marginBottom = Math.max(4, marginBottom - (26 - valueFontSize));
+      }
+
+      // 应用样式
+      items.forEach(item => {
+        const label = item.querySelector('.stat-label');
+        const value = item.querySelector('.stat-value');
+        const sub = item.querySelector('.stat-sub');
+
+        if (label) {
+          label.style.fontSize = labelFontSize + 'px';
+          label.style.marginBottom = marginBottom + 'px';
+        }
+        if (value) {
+          value.style.fontSize = valueFontSize + 'px';
+        }
+        if (sub) {
+          sub.style.fontSize = subFontSize + 'px';
+        }
+      });
+
+      // 调整网格高度
+      const totalHeight = labelFontSize + marginBottom + valueFontSize + 4 + subFontSize + 28; // 28 = padding
+      grid.style.minHeight = Math.max(80, totalHeight) + 'px';
+      grid.style.maxHeight = Math.max(100, totalHeight + 20) + 'px';
+    }
+
+    /**
+     * 动态调整顶部区域
+     */
+    function adjustTopSection() {
+      const stockName = document.getElementById('stock-name');
+      const mainPrice = document.getElementById('trade-price');
+      const subDetail = document.querySelector('.sub-detail');
+
+      // 股票名称字号调整
+      const stockNameContainer = stockName.parentElement;
+      const stockNameWidth = stockNameContainer.offsetWidth;
+      const stockNameTextWidth = measureTextWidth(stockName.textContent, 28, 700);
+      if (stockNameTextWidth > stockNameWidth) {
+        const newFontSize = calcFontSize(stockName.textContent, stockNameWidth, 28, 18, 700);
+        stockName.style.fontSize = newFontSize + 'px';
+      }
+
+      // 主价格字号调整
+      const priceGroup = mainPrice.parentElement;
+      const priceGroupWidth = priceGroup.offsetWidth;
+      const priceTextWidth = measureTextWidth(mainPrice.textContent, 56, 500);
+      if (priceTextWidth > priceGroupWidth) {
+        const newFontSize = calcFontSize(mainPrice.textContent, priceGroupWidth, 56, 32, 500);
+        mainPrice.style.fontSize = newFontSize + 'px';
+        mainPrice.style.letterSpacing = (newFontSize < 40) ? '-1px' : '-2px';
+      }
+
+      // sub-detail 区域：如果内容太长，缩小字号或隐藏分隔符
+      if (subDetail) {
+        const subDetailWidth = subDetail.offsetWidth;
+        const subDetailScrollWidth = subDetail.scrollWidth;
+
+        if (subDetailScrollWidth > subDetailWidth) {
+          // 先尝试缩小字号
+          const currentFontSize = parseFloat(getComputedStyle(subDetail).fontSize);
+          const newFontSize = Math.max(11, currentFontSize - 2);
+          subDetail.style.fontSize = newFontSize + 'px';
+
+          // 如果还是太长，隐藏 price-breakdown
+          if (subDetail.scrollWidth > subDetailWidth) {
+            const priceBreakdown = document.getElementById('price-breakdown');
+            if (priceBreakdown) {
+              priceBreakdown.style.display = 'none';
+              const seps = subDetail.querySelectorAll('.detail-sep');
+              if (seps.length > 0) {
+                seps[0].style.display = 'none';
+              }
+            }
+          }
+        }
+      }
+    }
+
+    /**
+     * 动态调整徽标
+     */
+    function adjustBadges() {
+      const badgesContainer = document.getElementById('badges-container');
+      const badges = badgesContainer.querySelectorAll('.badge');
+      const containerWidth = badgesContainer.offsetWidth;
+
+      let totalWidth = 0;
+      badges.forEach(badge => {
+        totalWidth += badge.offsetWidth + 8; // 8 = gap
+      });
+
+      if (totalWidth > containerWidth) {
+        badges.forEach(badge => {
+          const currentFontSize = parseFloat(getComputedStyle(badge).fontSize);
+          badge.style.fontSize = Math.max(10, currentFontSize - 2) + 'px';
+          badge.style.padding = '4px 8px';
+        });
+      }
+    }
+
+    // ============================================================
+    // 渲染逻辑
+    // ============================================================
 
     // --- 1. 渲染顶部基本信息 ---
     document.getElementById('stock-name').textContent = DATA.stockName || 'Unknown Stock';
     document.getElementById('trade-price').textContent = DATA.tradePrice.toFixed(2);
     document.getElementById('trade-price').className = `main-price ${DATA.tradeType}`;
     document.getElementById('trade-amount').textContent = DATA.amount;
-    document.getElementById('trade-total').textContent = DATA.totalCost.toFixed(2);
     document.getElementById('trade-time').textContent = (isPending ? '下单时间 ' : '交易时间 ') + DATA.tradeTime;
+
+    // 价格分解显示
+    const priceBreakdownEl = document.getElementById('price-breakdown');
+    if (DATA.deduction && DATA.deduction > 0) {
+      const sign = isBuy ? '+' : '-';
+      priceBreakdownEl.innerHTML = `市价 ${DATA.marketPrice.toFixed(2)} ${sign}${DATA.deduction.toFixed(2)} ${DATA.deductionLabel}`;
+      priceBreakdownEl.className = 'price-breakdown-text';
+    }
 
     // --- 2. 徽标渲染 ---
     const badgesContainer = document.getElementById('badges-container');
@@ -473,6 +713,10 @@
       `;
     }
 
+    // --- 执行动态调整 ---
+    adjustStatsGrid();
+    adjustTopSection();
+    adjustBadges();
 
     // --- 4. 图表绘制 ---
     const container = document.getElementById('chart-container');
@@ -516,10 +760,8 @@
         ctx.lineTo(W - pad.right, y);
         ctx.stroke();
 
-        // 价格标签 (字体也同步调整为 Roboto Mono 且加大)
         const val = yMin + (i / gridLines) * yRange;
         ctx.fillStyle = '#8b949e';
-        // 修改 1 & 2: 增大字号到 14px 并使用 Roboto Mono
         ctx.font = '500 14px "Roboto Mono", monospace';
         ctx.textAlign = 'left';
         ctx.fillText(val.toFixed(2), W - pad.right + 8, y + 4);
@@ -581,13 +823,12 @@
       ctx.arc(tp.x, tp.y, 4, 0, Math.PI * 2);
       ctx.fill();
 
-      // 价格标签 Tag (同步字体和大小)
+      // 价格标签 Tag
       const tagText = DATA.tradePrice.toFixed(2);
-      // 修改 1 & 2: 增大字号到 14px 并使用 Roboto Mono
       ctx.font = 'bold 14px "Roboto Mono", monospace';
       const tm = ctx.measureText(tagText);
       const tagW = tm.width + 16;
-      const tagH = 26; // 稍微增加高度适应大字号
+      const tagH = 26;
       const tagX = tp.x - tagW / 2;
       const tagY = tp.y - 36;
 
@@ -604,7 +845,7 @@
 
       ctx.fillStyle = '#1e232e';
       ctx.textAlign = 'center';
-      ctx.fillText(tagText, tp.x, tagY + 17); // 微调垂直对齐
+      ctx.fillText(tagText, tp.x, tagY + 17);
     }
 
   </script>

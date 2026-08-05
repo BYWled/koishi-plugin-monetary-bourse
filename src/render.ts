@@ -186,6 +186,11 @@ export async function renderTradeResultImage(
     pendingMinutes?: number;
     pendingEndTime?: string | null;
   },
+  priceBreakdown?: {
+    marketPrice: number;
+    deduction: number;
+    deductionLabel: string;
+  },
 ) {
   try {
     const templatePath = resolve(templatesDir, "trade-result.html");
@@ -218,6 +223,9 @@ export async function renderTradeResultImage(
       status,
       pendingMinutes,
       pendingEndTime,
+      marketPrice: priceBreakdown?.marketPrice ?? tradePrice,
+      deduction: priceBreakdown?.deduction ?? 0,
+      deductionLabel: priceBreakdown?.deductionLabel ?? '',
     };
 
     template = template.replace("{{DATA}}", JSON.stringify(data));

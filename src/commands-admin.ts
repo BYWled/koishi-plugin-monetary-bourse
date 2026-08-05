@@ -145,4 +145,67 @@ export function registerAdminCommands(deps: AdminCommandDeps) {
       switchKLinePattern("管理员手动");
       return "已切换K线模型。";
     });
+
+  ctx
+    .command(
+      "stock.circuit [action:string]",
+      "管理员：查看或清除熔断状态",
+      { authority: 3 },
+    )
+    .action(async ({ session }, action) => {
+      const state = (
+        await ctx.database.get("bourse_state", { key: "macro_state" })
+      )[0];
+
+      if (action === "clear" || action === "重置") {
+        if (state?.circuitBreakerUntil) {
+          await ctx.database.set(
+            "bourse_state",
+            { key: "macro_state" },
+            { circuitBreakerUntil: null, circuitBreakerTriggerPrice: null },
+          );
+          logger.info(`管理员 ${session.userId} 手动清除了熔断状态`);
+          return "熔断状态已清除，交易恢复正常。";
+        }
+        return "当前没有熔断状态。";
+      }
+
+      if (!config.circuitBreakerEnabled) {
+        return "熔断机制未启用。请在配置中开启 circuitBreakerEnabled。";
+      }
+
+      const currentPrice = getCurrentPrice();
+      const dailyOpen = getDailyOpenPrice();
+      const dailyDrop =
+        dailyOpen !== null
+          ? ((dailyOpen - currentPrice) / dailyOpen) * 100
+          : null;
+
+      let status = "📊 熔断机制状态\n";
+      status += `开关：已启用\n`;
+      status += `触发阈值：日跌幅 ${(config.circuitBreakerThreshold * 100).toFixed(0)}%\n`;
+      status += `持续时间：${config.circuitBreakerDuration} 分钟\n`;
+      status += `后期望模式：${config.circuitBreakerExpectation}\n`;
+
+      if (dailyDrop !== null) {
+        status += `当前日跌幅：${dailyDrop.toFixed(2)}%\n`;
+      }
+
+      if (state?.circuitBreakerUntil) {
+        const until = state.circuitBreakerUntil instanceof Date
+          ? state.circuitBreakerUntil
+          : new Date(state.circuitBreakerUntil);
+        const now = new Date();
+        if (now < until) {
+          status += `⚠️ 熔断中！预计 ${until.toLocaleString("zh-CN")} 恢复\n`;
+        } else {
+          status += `状态：正常（熔断已过期）\n`;
+        }
+      } else {
+        status += `状态：正常\n`;
+      }
+
+      status += `\n使用 stock.circuit clear 可手动清除熔断状态`;
+      return status;
+    });
 }
