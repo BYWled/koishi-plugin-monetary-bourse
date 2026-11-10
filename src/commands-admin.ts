@@ -15,6 +15,7 @@ type AdminCommandDeps = {
     cycleProgress?: number,
   ) => void;
   broadcastMacroNews: (targetPrice: number, basePrice: number) => Promise<void>;
+  resetCircuitBreaker?: () => void;
 };
 
 export function registerAdminCommands(deps: AdminCommandDeps) {
@@ -28,6 +29,7 @@ export function registerAdminCommands(deps: AdminCommandDeps) {
     isMarketOpen,
     switchKLinePattern,
     broadcastMacroNews,
+    resetCircuitBreaker,
   } = deps;
 
   ctx
@@ -89,7 +91,12 @@ export function registerAdminCommands(deps: AdminCommandDeps) {
         targetPriceClamped !== price
           ? `（已按±50%限幅从${price}调整为${Number(targetPriceClamped.toFixed(2))}）`
           : "";
-      return `宏观调控已设置：\n目标价格：${Number(targetPriceClamped.toFixed(2))}${hint}\n期限：${duration}小时\n模式：手动干预\n到期后将自动切回随机调控。`;
+      const dropPct = ((dayBase - targetPriceClamped) / dayBase) * 100;
+      let cbHint = "";
+      if (config.circuitBreakerEnabled && dropPct >= config.circuitBreakerThreshold * 100) {
+        cbHint = `\n⚠️ 提示：目标跌幅 ${dropPct.toFixed(1)}% 达到或超过日内熔断阈值（${(config.circuitBreakerThreshold * 100).toFixed(0)}%），单日跌破该点位时将触发熔断冷却。`;
+      }
+      return `宏观调控已设置：\n目标价格：${Number(targetPriceClamped.toFixed(2))}${hint}\n期限：${duration}小时\n模式：手动干预\n到期后将自动切回随机调控。${cbHint}`;
     });
 
   ctx
@@ -158,16 +165,21 @@ export function registerAdminCommands(deps: AdminCommandDeps) {
       )[0];
 
       if (action === "clear" || action === "重置") {
-        if (state?.circuitBreakerUntil) {
+        if (state?.circuitBreakerUntil || state?.lastCircuitBreakerDate) {
           await ctx.database.set(
             "bourse_state",
             { key: "macro_state" },
-            { circuitBreakerUntil: null, circuitBreakerTriggerPrice: null },
+            {
+              circuitBreakerUntil: null,
+              circuitBreakerTriggerPrice: null,
+              lastCircuitBreakerDate: null,
+            },
           );
-          logger.info(`管理员 ${session.userId} 手动清除了熔断状态`);
-          return "熔断状态已清除，交易恢复正常。";
+          resetCircuitBreaker?.();
+          logger.info(`管理员 ${session.userId} 手动清除了熔断状态与当日触发记录`);
+          return "熔断状态与当日触发记录已清除，交易恢复正常。";
         }
-        return "当前没有熔断状态。";
+        return "当前没有熔断状态或记录。";
       }
 
       if (!config.circuitBreakerEnabled) {
@@ -187,8 +199,16 @@ export function registerAdminCommands(deps: AdminCommandDeps) {
       status += `持续时间：${config.circuitBreakerDuration} 分钟\n`;
       status += `后期望模式：${config.circuitBreakerExpectation}\n`;
 
+      if (dailyOpen !== null) {
+        status += `当日开盘价：${dailyOpen.toFixed(2)}\n`;
+      }
       if (dailyDrop !== null) {
         status += `当前日跌幅：${dailyDrop.toFixed(2)}%\n`;
+      }
+      if (state?.lastCircuitBreakerDate) {
+        status += `今日熔断记录：已触发（${state.lastCircuitBreakerDate}）\n`;
+      } else {
+        status += `今日熔断记录：未触发\n`;
       }
 
       if (state?.circuitBreakerUntil) {

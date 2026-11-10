@@ -1,4 +1,4 @@
-﻿import { Context, Schema, Logger } from "koishi";
+import { Context, Schema, Logger } from "koishi";
 import {} from "koishi-plugin-monetary";
 import {} from "koishi-plugin-puppeteer";
 import {
@@ -92,7 +92,10 @@ export interface BourseState {
   marketOpenStatus?: "open" | "close" | "auto"; // 市场开关状态
   lastDividendDate?: Date; // 上次分红时间
   circuitBreakerUntil?: Date; // 熔断截止时间（存在则表示熔断中）
-  circuitBreakerTriggerPrice?: number; // 熔断触发时的价格（用于回弹模式）
+  circuitBreakerTriggerPrice?: number; // 熔断触发时的实际市价
+  lastCircuitBreakerDate?: string; // 记录当日熔断触发日期(YYYY-MM-DD)，避免单日重复触发死锁
+  dailyOpenPrice?: number; // 当日开盘价持久化
+  lastDailyOpenDate?: string; // 上次记录开盘价的日期(YYYY-MM-DD)
 }
 
 export const usage = `
@@ -435,6 +438,9 @@ export function apply(ctx: Context, config: Config) {
       lastDividendDate: "timestamp",
       circuitBreakerUntil: "timestamp",
       circuitBreakerTriggerPrice: "double",
+      lastCircuitBreakerDate: "string",
+      dailyOpenPrice: "double",
+      lastDailyOpenDate: "string",
     },
     { primary: "key" },
   );
@@ -573,12 +579,77 @@ export function apply(ctx: Context, config: Config) {
     }
   });
 
+  function getTradingDateKey(d: Date): string {
+    // 按每日开市时间分割交易日，保证跨夜交易归属同一交易日（从今日 openHour 到次日 openHour）
+    const adjusted = new Date(d.getTime());
+    if (adjusted.getHours() < config.openHour) {
+      adjusted.setDate(adjusted.getDate() - 1);
+    }
+    const year = adjusted.getFullYear();
+    const month = String(adjusted.getMonth() + 1).padStart(2, "0");
+    const date = String(adjusted.getDate()).padStart(2, "0");
+    return `${year}-${month}-${date}`;
+  }
+
   // 追踪市场开市状态，用于在开市时切换K线模型
   let wasMarketOpen = false;
-  // 记录当日开盘价，用于日内涨跌幅限制
+  // 记录当日开盘价、日期及熔断标记，用于日内涨跌幅限制与单日防死锁判断
   let dailyOpenPrice: number | null = null;
+  let lastDailyOpenDate: string | null = null;
+  let lastCircuitBreakerDate: string | null = null;
   // 内部测试用：虚拟时间（存在则以此为准，不使用系统时间）
   let __testNow: Date | null = null;
+
+  function isMarketOpenAt(now: Date, state?: BourseState): boolean {
+    if (config.marketStatus === "open") return true;
+    if (config.marketStatus === "close") return false;
+    if (state?.marketOpenStatus === "open") return true;
+    if (state?.marketOpenStatus === "close") return false;
+    const day = now.getDay();
+    const hour = now.getHours();
+    if (day === 0 || day === 6) return false;
+    if (hour < config.openHour || hour >= config.closeHour) return false;
+    return true;
+  }
+
+  async function checkAndUpdateDailyOpen(now: Date, state?: BourseState) {
+    const todayKey = getTradingDateKey(now);
+    // 首次恢复：如果内存为空且数据库中有当日记录，直接恢复，避免重启重置日内基准
+    if (dailyOpenPrice === null && state?.dailyOpenPrice && state.lastDailyOpenDate === todayKey) {
+      dailyOpenPrice = state.dailyOpenPrice;
+      lastDailyOpenDate = state.lastDailyOpenDate;
+      lastCircuitBreakerDate = state.lastCircuitBreakerDate ?? null;
+      return;
+    }
+
+    // 判断是否需要刷新日开盘价（新的一天或尚未记录）
+    const isNewDay = !lastDailyOpenDate || lastDailyOpenDate !== todayKey;
+    if (isNewDay) {
+      // 只有在市场处于开市状态或到达开市时刻后才刷新开盘价
+      if (!isMarketOpenAt(now, state)) {
+        return;
+      }
+      dailyOpenPrice = currentPrice;
+      lastDailyOpenDate = todayKey;
+      lastCircuitBreakerDate = null; // 新交易日重置单日熔断记录
+
+      if (state) {
+        state.dailyOpenPrice = currentPrice;
+        state.lastDailyOpenDate = todayKey;
+        state.lastCircuitBreakerDate = undefined;
+        await ctx.database.set(
+          "bourse_state",
+          { key: "macro_state" },
+          {
+            dailyOpenPrice: currentPrice,
+            lastDailyOpenDate: todayKey,
+            lastCircuitBreakerDate: null,
+          },
+        );
+      }
+      logger.info(`新交易日 [${todayKey}] 开启，开盘价记录为: ${currentPrice}`);
+    }
+  }
 
   // 市场定时任务（每 2 分钟运行一次）
   ctx.setInterval(
@@ -587,8 +658,7 @@ export function apply(ctx: Context, config: Config) {
 
       // 检测开市事件：从关闭变为开启
       if (isOpen && !wasMarketOpen) {
-        // 开市了，记录当日开盘价（用于日内限制）
-        dailyOpenPrice = currentPrice;
+        switchKLinePattern("定时开市");
       }
       wasMarketOpen = isOpen;
 
@@ -608,28 +678,12 @@ export function apply(ctx: Context, config: Config) {
 
   // 辅助：检查是否开市（简化的周末与时间校验）
   async function isMarketOpen() {
-    // 优先使用配置中的开关
-    if (config.marketStatus === "open") return true;
-    if (config.marketStatus === "close") return false;
-
-    // 其次检查数据库中的手动开关（命令设置的）
     const states = await ctx.database.get("bourse_state", {
       key: "macro_state",
     });
     const state = states[0];
-    if (state && state.marketOpenStatus) {
-      if (state.marketOpenStatus === "open") return true;
-      if (state.marketOpenStatus === "close") return false;
-    }
-
-    const now = new Date();
-    const day = now.getDay();
-    const hour = now.getHours();
-
-    // 0 是周日, 6 是周六
-    if (day === 0 || day === 6) return false;
-    if (hour < config.openHour || hour >= config.closeHour) return false;
-    return true;
+    const now = __testNow ?? new Date();
+    return isMarketOpenAt(now, state);
   }
 
   // --- 资金操作辅助函数 ---
@@ -990,6 +1044,7 @@ export function apply(ctx: Context, config: Config) {
     expectedPrice: number,
     curPrice: number,
     cycleProgress: number,
+    avoidInitialDip = false,
   ): string {
     const deviation = (expectedPrice - curPrice) / curPrice;
     let bullishProb = 0.33,
@@ -1031,7 +1086,15 @@ export function apply(ctx: Context, config: Config) {
     else if (rand < bullishProb + bearishProb) category = "bearish";
     else category = "neutral";
 
-    const patterns = patternsByCategory[category];
+    let patterns = patternsByCategory[category];
+    // 熔断回弹等场景下，避免选择前期大幅深蹲下探的形态（如 V型反转、W底、早盘低开等）
+    if (avoidInitialDip && category === "bullish") {
+      const filtered = patterns.filter(
+        (name) =>
+          !["bullish_v_reversal", "bullish_double_bottom", "bullish_morning_dip"].includes(name),
+      );
+      if (filtered.length > 0) patterns = filtered;
+    }
     const selected = patterns[Math.floor(Math.random() * patterns.length)];
     logger.info(
       `selectPatternByExpectation: deviation=${(deviation * 100).toFixed(2)}%, selected=${category}/${selected}`,
@@ -1044,6 +1107,7 @@ export function apply(ctx: Context, config: Config) {
     reason: string,
     expectedPrice?: number,
     cycleProgress?: number,
+    avoidInitialDip = false,
   ) {
     const oldPattern = currentPattern;
     if (expectedPrice !== undefined && cycleProgress !== undefined) {
@@ -1051,6 +1115,7 @@ export function apply(ctx: Context, config: Config) {
         expectedPrice,
         currentPrice,
         cycleProgress,
+        avoidInitialDip,
       );
     } else {
       currentPattern =
@@ -1077,6 +1142,9 @@ export function apply(ctx: Context, config: Config) {
       await ctx.database.get("bourse_state", { key: "macro_state" })
     )[0];
     const now = __testNow ?? new Date();
+
+    // 检查并更新每日开盘价与单日熔断重置
+    await checkAndUpdateDailyOpen(now, state);
 
     // 确保时间类型正确
     if (state) {
@@ -1106,42 +1174,65 @@ export function apply(ctx: Context, config: Config) {
       }
       // 熔断刚结束，处理后期望
       const expectation = config.circuitBreakerExpectation;
-      if (expectation === "rebound" && state.circuitBreakerTriggerPrice) {
-        // 回弹模式：目标价恢复到熔断触发时的价格（当日开盘价）
-        state.targetPrice = state.circuitBreakerTriggerPrice;
+      const isManual = state.mode === "manual";
+
+      // 1. 清除熔断冻结时间（保留 lastCircuitBreakerDate 避免单日重复触发死锁）
+      state.circuitBreakerUntil = undefined;
+      await ctx.database.set(
+        "bourse_state",
+        { key: "macro_state" },
+        { circuitBreakerUntil: null },
+      );
+
+      // 2. 根据调控模式和后期望模式进行处理
+      if (isManual) {
+        // 手动调控保护：管理员已指定明确目标，不强制篡改目标价
+        logger.info(
+          `熔断结束：当前处于手动调控模式（目标价 ${state.targetPrice}），保持原目标平滑恢复`,
+        );
+        switchKLinePattern("熔断恢复", state.targetPrice, 0.5);
+      } else if (expectation === "rebound") {
+        // 回弹模式：目标价设为当日开盘价（向开盘价反弹）
+        const reboundTarget = dailyOpenPrice ?? currentPrice;
+        state.targetPrice = reboundTarget;
+        // 重置周期起始价与时间，确保均值回归 trackPrice 平滑插值，避免数学模型断层
+        state.startPrice = currentPrice;
+        state.lastCycleStart = now;
         await ctx.database.set(
           "bourse_state",
           { key: "macro_state" },
-          { targetPrice: state.targetPrice },
+          {
+            targetPrice: state.targetPrice,
+            startPrice: state.startPrice,
+            lastCycleStart: state.lastCycleStart,
+          },
         );
         logger.info(
-          `熔断结束（回弹模式）：目标价恢复到 ${state.circuitBreakerTriggerPrice}`,
+          `熔断结束（回弹模式）：目标价设为开盘价 ${reboundTarget}，重置插值基准`,
         );
-        switchKLinePattern("熔断回弹", state.targetPrice, 0.5);
+        switchKLinePattern("熔断回弹", state.targetPrice, 0.5, true);
       } else if (expectation === "flat") {
-        // 持平模式：目标价设为当前价格
+        // 持平模式：目标价设为当前价
         state.targetPrice = currentPrice;
+        state.startPrice = currentPrice;
+        state.lastCycleStart = now;
         await ctx.database.set(
           "bourse_state",
           { key: "macro_state" },
-          { targetPrice: state.targetPrice },
+          {
+            targetPrice: state.targetPrice,
+            startPrice: state.startPrice,
+            lastCycleStart: state.lastCycleStart,
+          },
         );
         logger.info(
-          `熔断结束（持平模式）：目标价设为当前价 ${currentPrice}`,
+          `熔断结束（持平模式）：目标价设为当前价 ${currentPrice}，重置插值基准`,
         );
         switchKLinePattern("熔断持平", state.targetPrice, 0.5);
       } else {
         // 随机模式：不做特殊处理
         logger.info("熔断结束（随机模式）：恢复正常宏观调控");
       }
-      // 清除熔断状态
-      await ctx.database.set(
-        "bourse_state",
-        { key: "macro_state" },
-        { circuitBreakerUntil: null, circuitBreakerTriggerPrice: null },
-      );
-      state.circuitBreakerUntil = undefined;
-      state.circuitBreakerTriggerPrice = undefined;
     }
 
     // 状态初始化或过期检查（手动与自动到期都应切换为自动新周期）
@@ -1330,22 +1421,38 @@ export function apply(ctx: Context, config: Config) {
     // 熔断机制：检查是否触发熔断
     // ============================================================
     if (config.circuitBreakerEnabled && dailyOpenPrice !== null) {
-      const dailyDrop = (dailyOpenPrice - currentPrice) / dailyOpenPrice;
-      if (dailyDrop >= config.circuitBreakerThreshold) {
-        const circuitBreakerUntil = new Date(
-          now.getTime() + config.circuitBreakerDuration * 60 * 1000,
-        );
-        await ctx.database.set(
-          "bourse_state",
-          { key: "macro_state" },
-          {
-            circuitBreakerUntil,
-            circuitBreakerTriggerPrice: dailyOpenPrice,
-          },
-        );
-        logger.warn(
-          `熔断触发！日跌幅 ${(dailyDrop * 100).toFixed(2)}% 超过阈值 ${(config.circuitBreakerThreshold * 100).toFixed(0)}%，熔断至 ${circuitBreakerUntil.toLocaleString()}`,
-        );
+      const todayKey = getTradingDateKey(now);
+      const alreadyTriggeredToday =
+        (state?.lastCircuitBreakerDate ?? lastCircuitBreakerDate) === todayKey;
+      const isBreakerActive = !!(
+        state?.circuitBreakerUntil && now < state.circuitBreakerUntil
+      );
+
+      // 单日同档位熔断最多触发一次，且当前未处于熔断中
+      if (!alreadyTriggeredToday && !isBreakerActive) {
+        const dailyDrop = (dailyOpenPrice - currentPrice) / dailyOpenPrice;
+        if (dailyDrop >= config.circuitBreakerThreshold) {
+          const circuitBreakerUntil = new Date(
+            now.getTime() + config.circuitBreakerDuration * 60 * 1000,
+          );
+          state.circuitBreakerUntil = circuitBreakerUntil;
+          state.circuitBreakerTriggerPrice = currentPrice; // 正确记录触发熔断时的实际市价
+          state.lastCircuitBreakerDate = todayKey;
+          lastCircuitBreakerDate = todayKey;
+
+          await ctx.database.set(
+            "bourse_state",
+            { key: "macro_state" },
+            {
+              circuitBreakerUntil,
+              circuitBreakerTriggerPrice: currentPrice,
+              lastCircuitBreakerDate: todayKey,
+            },
+          );
+          logger.warn(
+            `熔断触发！日跌幅 ${(dailyDrop * 100).toFixed(2)}% 超过阈值 ${(config.circuitBreakerThreshold * 100).toFixed(0)}%，熔断至 ${circuitBreakerUntil.toLocaleString()}`,
+          );
+        }
       }
     }
   }
@@ -1665,6 +1772,10 @@ export function apply(ctx: Context, config: Config) {
     __testNow = value;
   };
 
+  const resetCircuitBreaker = () => {
+    lastCircuitBreakerDate = null;
+  };
+
   const getCircuitBreakerStatus = async () => {
     if (!config.circuitBreakerEnabled) return { active: false, until: null };
     const state = (
@@ -1716,6 +1827,7 @@ export function apply(ctx: Context, config: Config) {
     isMarketOpen,
     switchKLinePattern,
     broadcastMacroNews,
+    resetCircuitBreaker,
   });
 
   registerTestCommands({
